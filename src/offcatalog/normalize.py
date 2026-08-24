@@ -9,8 +9,11 @@ _PUNCTUATION_RE = re.compile(r"[^\w\s]")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 _NEUTRAL_QUALIFIER_RE = re.compile(
-    r"\(?\s*remaster(?:ed)?(?:\s+\d{4})?\s*\)?", re.IGNORECASE
+    r"^\s*remaster(?:ed)?(?:\s+\d{4})?\s*$", re.IGNORECASE
 )
+
+_PAREN_GROUP_RE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+_FEATURING_GROUP_RE = re.compile(r"^\s*(feat\.?|ft\.?|featuring)\b", re.IGNORECASE)
 
 _DISTINGUISHING_QUALIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("live", re.compile(r"\blive\b", re.IGNORECASE)),
@@ -43,34 +46,26 @@ class ExtractedTitle:
 
 
 def extract_qualifiers(raw_title: str) -> ExtractedTitle:
-    working = raw_title
     found: list[str] = []
 
-    # Extract parenthetical text to check for free-text mixes
-    paren_pattern = re.compile(r'\(([^)]+)\)')
-    parens = paren_pattern.findall(working)
-
-    for label, pattern in _DISTINGUISHING_QUALIFIER_PATTERNS:
-        if pattern.search(working) and label not in found:
+    def replace_group(match: re.Match) -> str:
+        group_text = match.group(1).strip()
+        if not group_text:
+            return match.group(0)
+        if _FEATURING_GROUP_RE.match(group_text):
+            return match.group(0)  # artist-credit parenthetical, not a version qualifier — leave untouched
+        if _NEUTRAL_QUALIFIER_RE.match(group_text):
+            return " "
+        for label, pattern in _DISTINGUISHING_QUALIFIER_PATTERNS:
+            if pattern.search(group_text):
+                if label not in found:
+                    found.append(label)
+                return " "
+        label = normalize_text(group_text)
+        if label and label not in found:
             found.append(label)
+        return " "
 
-    # Check for free-text mix names in parentheses
-    for paren_text in parens:
-        normalized_paren = paren_text.lower().strip()
-        # Check if it's a known pattern (already handled above)
-        is_known = any(pattern.search(paren_text) for _, pattern in _DISTINGUISHING_QUALIFIER_PATTERNS)
-        is_neutral = _NEUTRAL_QUALIFIER_RE.search(paren_text)
-
-        if not is_known and not is_neutral and normalized_paren.endswith("mix"):
-            # It's a free-text mix qualifier
-            normalized_mix = normalize_text(paren_text)
-            if normalized_mix not in found:
-                found.append(normalized_mix)
-
-    working = _NEUTRAL_QUALIFIER_RE.sub(" ", working)
-    for _, pattern in _DISTINGUISHING_QUALIFIER_PATTERNS:
-        working = pattern.sub(" ", working)
-    working = re.sub(r"[()\[\]]", " ", working)
-
+    working = _PAREN_GROUP_RE.sub(replace_group, raw_title)
     base_title = normalize_text(working)
     return ExtractedTitle(base_title=base_title, qualifiers=found)
