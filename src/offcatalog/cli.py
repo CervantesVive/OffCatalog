@@ -55,7 +55,7 @@ def _main() -> None:
 @app.command()
 def scan(
     path: str = typer.Argument(".", help="Directory to scan for .mp3 files"),
-    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
 ) -> None:
     conn = get_connection(db)
     added = 0
@@ -98,7 +98,7 @@ def scan(
 
 @app.command()
 def check(
-    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
     limit: int | None = typer.Option(None, "--limit", help="Max tracks to check this run"),
     provider_name: str = typer.Option("deezer", "--provider", help="Provider to check against"),
     retry_errors: bool = typer.Option(False, "--retry-errors", help="Re-check tracks currently in ERROR state"),
@@ -131,7 +131,7 @@ def check(
 
 @app.command()
 def review(
-    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
     provider_name: str = typer.Option("deezer", "--provider", help="Provider whose ambiguous matches to review"),
 ) -> None:
     conn = get_connection(db)
@@ -160,7 +160,7 @@ def review(
 
 @app.command()
 def playlist(
-    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
     state: str = typer.Option("unavailable_everywhere", "--state", help="unavailable_everywhere | ambiguous"),
     output: str = typer.Option("playlists/not-on-streaming.m3u8", "--output", help="Output .m3u8 path"),
 ) -> None:
@@ -177,7 +177,7 @@ def playlist(
 
 
 @app.command()
-def stats(db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database")) -> None:
+def stats(db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database")) -> None:
     conn = get_connection(db)
     counts = compute_state_counts(conn)
     total = sum(counts.values())

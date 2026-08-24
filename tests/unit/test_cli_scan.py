@@ -26,6 +26,23 @@ def test_scan_inserts_tracks_found_in_directory(tmp_path):
     assert count == 2
 
 
+def test_scan_respects_offcatalog_db_env_var(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    db_path = tmp_path / "env_catalog.db"
+
+    result = runner.invoke(
+        app, ["scan", str(music_dir)], env={"OFFCATALOG_DB": str(db_path)}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert db_path.exists()
+    conn = get_connection(str(db_path))
+    count = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()["c"]
+    assert count == 1
+
+
 def test_scan_is_idempotent(tmp_path):
     music_dir = tmp_path / "music"
     music_dir.mkdir()
