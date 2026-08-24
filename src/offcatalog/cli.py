@@ -193,12 +193,20 @@ def stats(db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLi
         for label, count in qualifier_counts.most_common(5):
             typer.echo(f"  {label}: {count}")
 
-    for state, filename in [("UNAVAILABLE", "unavailable.csv"), ("AMBIGUOUS", "ambiguous.csv"), ("ERROR", "errors.csv")]:
+    # UNAVAILABLE/AMBIGUOUS: `reason` holds the matching-engine explanation
+    # (e.g. "no_candidates", "fuzzy_candidate"). ERROR: `reason` is only the
+    # generic "provider_error"; the actual exception text lives in
+    # error_message, which is more useful in errors.csv.
+    for state, filename, reason_column in [
+        ("UNAVAILABLE", "unavailable.csv", "reason"),
+        ("AMBIGUOUS", "ambiguous.csv", "reason"),
+        ("ERROR", "errors.csv", "error_message"),
+    ]:
         rows = [
             {
                 "artist": r["artist"], "title": r["title"], "album": r["album"],
                 "duration": r["duration_seconds"], "path": r["file_path"],
-                "last_checked": r["checked_at"], "reason": r["error_message"] or "",
+                "last_checked": r["checked_at"], "reason": r[reason_column] or "",
             }
             for r in list_tracks_by_state(conn, state)
         ]

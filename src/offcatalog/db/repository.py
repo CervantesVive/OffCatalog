@@ -195,13 +195,13 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
 
     conn.execute(
         """
-        INSERT INTO availability_results (local_track_id, provider_id, state, best_candidate_id, checked_at, error_message)
-        VALUES (?,?,?,?,?,?)
+        INSERT INTO availability_results (local_track_id, provider_id, state, best_candidate_id, checked_at, error_message, reason)
+        VALUES (?,?,?,?,?,?,?)
         ON CONFLICT(local_track_id, provider_id) DO UPDATE SET
             state=excluded.state, best_candidate_id=excluded.best_candidate_id,
-            checked_at=excluded.checked_at, error_message=excluded.error_message
+            checked_at=excluded.checked_at, error_message=excluded.error_message, reason=excluded.reason
         """,
-        (local_track_id, provider_id, result.state.value, best_candidate_id, _now(), result.error_message),
+        (local_track_id, provider_id, result.state.value, best_candidate_id, _now(), result.error_message, result.reason),
     )
     conn.commit()
 
@@ -248,20 +248,26 @@ def get_availability_state(conn: sqlite3.Connection, local_track_id: str, provid
 def compute_state_counts(conn: sqlite3.Connection) -> dict[str, int]:
     # Scoped to the primary (first-registered) provider only. Multi-provider
     # stats breakdown is future scope, not implemented here.
+    # NOT_CHECKED is a synthetic default (see get_availability_state) never
+    # inserted as a row, so it's derived from the gap between total tracks
+    # and rows actually recorded, not read via GROUP BY.
+    total_tracks = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()["c"]
+    provider_row = conn.execute("SELECT id FROM providers ORDER BY rowid LIMIT 1").fetchone()
+    if provider_row is None:
+        return {"NOT_CHECKED": total_tracks} if total_tracks else {}
     rows = conn.execute(
-        """
-        SELECT state, COUNT(*) AS c FROM availability_results
-        WHERE provider_id = (SELECT id FROM providers ORDER BY rowid LIMIT 1)
-        GROUP BY state
-        """
+        "SELECT state, COUNT(*) AS c FROM availability_results WHERE provider_id = ? GROUP BY state",
+        (provider_row["id"],),
     ).fetchall()
-    return {row["state"]: row["c"] for row in rows}
+    counts = {row["state"]: row["c"] for row in rows}
+    counts["NOT_CHECKED"] = total_tracks - sum(counts.values())
+    return counts
 
 
 def list_tracks_by_state(conn: sqlite3.Connection, state: str) -> list[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT lt.*, ar.error_message, ar.checked_at, f.path AS file_path
+        SELECT lt.*, ar.error_message, ar.reason, ar.checked_at, f.path AS file_path
         FROM local_tracks lt
         JOIN availability_results ar ON ar.local_track_id = lt.id
         JOIN files f ON f.id = lt.file_id

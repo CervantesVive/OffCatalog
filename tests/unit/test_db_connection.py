@@ -18,10 +18,12 @@ def test_get_connection_applies_migrations(tmp_path):
 
 def test_get_connection_is_idempotent(tmp_path):
     db_path = str(tmp_path / "test.db")
-    get_connection(db_path).close()
-    conn = get_connection(db_path)  # must not error re-applying
+    first = get_connection(db_path)
+    expected = first.execute("SELECT COUNT(*) AS c FROM schema_migrations").fetchone()["c"]
+    first.close()
+    conn = get_connection(db_path)  # must not error re-applying, and must not re-insert rows
     count = conn.execute("SELECT COUNT(*) AS c FROM schema_migrations").fetchone()["c"]
-    assert count == 1
+    assert count == expected
     conn.close()
 
 
