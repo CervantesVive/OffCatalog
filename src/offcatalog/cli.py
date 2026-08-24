@@ -17,6 +17,7 @@ from offcatalog.matching.engine import match_track
 from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
 from offcatalog.providers.deezer import DeezerProvider
+from offcatalog.ratelimit import TokenBucket
 from offcatalog.scanning.extract import extract_local_track
 
 app = typer.Typer(help="Scan an MP3 collection and find tracks not on streaming.")
@@ -101,6 +102,7 @@ def check(
         needs_check_states.add(AvailabilityState.ERROR.value)
 
     checked = 0
+    rate_limiter = TokenBucket(rate=45, per_seconds=5.0)
     for row in rows:
         if limit is not None and checked >= limit:
             break
@@ -108,6 +110,7 @@ def check(
         if current_state not in needs_check_states:
             continue
         track = _row_to_track(row)
+        rate_limiter.wait()
         result = match_track(track, provider)
         record_check_result(conn, track.id, provider_name, result)
         typer.echo(f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})")

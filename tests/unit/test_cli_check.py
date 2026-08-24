@@ -98,3 +98,24 @@ def test_check_without_retry_errors_leaves_error_state_alone(tmp_path):
         result = runner.invoke(app, ["check", "--db", str(db_path)])  # no --retry-errors
 
     assert "Checked 0 track(s)" in result.output
+
+
+def test_check_persists_progress_across_interrupted_run(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    shutil.copy(FIXTURES / "live_version.mp3", music_dir / "live_version.mp3")
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    def ok_handler(request):
+        if "isrc" in request.url.path:
+            return httpx.Response(200, json={"error": {"type": "DataException"}})
+        return httpx.Response(200, json={"data": []})
+
+    with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(ok_handler)):
+        runner.invoke(app, ["check", "--db", str(db_path), "--limit", "1"])
+
+    conn = get_connection(str(db_path))
+    checked_count = conn.execute("SELECT COUNT(*) AS c FROM availability_results").fetchone()["c"]
+    assert checked_count == 1  # first track's result persisted even though run was limited/interrupted
