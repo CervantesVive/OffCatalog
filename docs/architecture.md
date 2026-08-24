@@ -207,18 +207,24 @@ against Deezer's published ~50 requests/5s limit.
 
 ## What leaves this machine
 
-Only normalized track metadata is ever sent to a provider's search
-endpoint: **artist, title, album (if present), duration, and ISRC (if
-present)** — the exact fields in `ProviderCandidate`'s inputs
-(`DeezerProvider.search_track`/`search_by_isrc` build their query from
-`track.raw.artist`/`track.raw.title` or the normalized equivalents, plus the
-ISRC string for the direct lookup).
+Only normalized track metadata is ever sent to a provider. Two request
+shapes exist:
 
-**Never sent:** file paths, audio data, raw ID3 blobs, or any other tag not
-listed above (e.g. no `musicbrainz_track_id`, no `track_number`, no
-filename). The provider call is a plain HTTPS `GET` to a public
-catalog-search endpoint; Deezer's catalog search requires no API key or
-account credentials at all (see [provider-selection.md](provider-selection.md)).
+- `search_by_isrc`: sends only the ISRC string.
+- `search_track`: sends only the **normalized** artist and title
+  (`track.artist`/`track.title` — lowercased, Unicode-normalized,
+  punctuation-collapsed), never the raw ID3 tag text. Album and duration are
+  never transmitted at all — they're used purely for local candidate
+  filtering in `matching/engine.py` after the provider has already
+  responded.
+
+**Never sent:** file paths, audio data, raw ID3 blobs (original casing,
+punctuation, or diacritics as stored in the tag), album, duration, or any
+other tag not listed above (e.g. no `musicbrainz_track_id`, no
+`track_number`, no filename). The provider call is a plain HTTPS `GET` to a
+public catalog-search endpoint; Deezer's catalog search requires no API key
+or account credentials at all (see
+[provider-selection.md](provider-selection.md)).
 
 ## CLI command summary
 

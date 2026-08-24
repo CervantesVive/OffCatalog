@@ -91,6 +91,42 @@ def test_search_track_returns_candidates():
     assert candidates[0]["artist"] == "Depeche Mode"
 
 
+def test_search_track_sends_normalized_fields_not_raw_tags():
+    captured_queries = []
+
+    def handler(request):
+        captured_queries.append(request.url.params["q"])
+        return httpx.Response(200, json={"data": []})
+
+    track = make_track(
+        raw=RawTags(
+            "DEPECHE MODE!!",
+            "Enjoy The Silence (Örig. Mix)",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        artist="depeche mode",
+        title="enjoy the silence",
+    )
+    provider = DeezerProvider(client=_client_with(handler))
+    provider.search_track(track)
+
+    assert len(captured_queries) == 1
+    query = captured_queries[0]
+    assert "depeche mode" in query
+    assert "enjoy the silence" in query
+    # The raw tag text (original casing/punctuation/diacritics) must never
+    # leave the machine -- only the normalized fields are sent.
+    assert "DEPECHE MODE!!" not in query
+    assert "Örig. Mix" not in query
+
+
 def test_network_failure_raises_provider_error():
     def handler(request):
         raise httpx.ConnectTimeout("timed out", request=request)

@@ -31,7 +31,7 @@ class DeezerProvider:
         return self._to_candidate(data)
 
     def search_track(self, track: LocalTrack) -> list[ProviderCandidate]:
-        query = f'artist:"{track.raw.artist or track.artist}" track:"{track.raw.title or track.title}"'
+        query = f'artist:"{track.artist}" track:"{track.title}"'
         data = self._get("/search", params={"q": query})
         if "error" in data:
             self._raise_unless_not_found(data)
