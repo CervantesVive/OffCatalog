@@ -30,6 +30,7 @@ src/offcatalog/
     migrations/
       0001_init.sql              # full initial schema
       0002_availability_results_reason.sql  # adds availability_results.reason
+      0003_availability_results_checked_fingerprint.sql  # adds checked_fingerprint
 docker/
   Dockerfile
 docker-compose.yml
@@ -51,8 +52,9 @@ Data flows in one direction through the pipeline:
 
 Raw and normalized fields are kept separate on `LocalTrack` (`raw: RawTags`
 alongside normalized `artist`/`title`/etc.) — normalization must never be
-lossy for matching purposes, and the untouched raw tags are what's actually
-sent to the provider's search query (see "What leaves this machine" below).
+lossy for matching purposes, so the untouched raw tags are kept locally for
+display, reports and fingerprinting. Only the **normalized** fields are sent
+to the provider's search query (see "What leaves this machine" below).
 
 ## Database
 
@@ -72,7 +74,10 @@ command) brings the schema up to date automatically.
 - **`files`** — one row per scanned path. `mtime`/`size` support cheap
   change detection (skip re-parsing ID3 tags when neither changed).
   `deleted_at` is a soft delete — rows are never removed, just marked, so a
-  reconnected drive or restored file can resurrect its history.
+  reconnected drive or restored file can resurrect its history. Every
+  read-side query in `repository.py` (playlists, reports, state counts,
+  the review queue) filters on `deleted_at IS NULL`, so an unmounted drive
+  drops out of output instead of emitting paths that no longer exist.
 - **`local_tracks`** — one row per file's extracted track metadata,
   keyed by `file_id`. `version_qualifiers` and `raw_tags_json` are stored as
   JSON text columns (SQLite has no native array/object type). A file has at
@@ -97,7 +102,11 @@ command) brings the schema up to date automatically.
   `no_candidates`, `no_confident_candidate`, or `provider_error` — and is
   populated unconditionally by `record_check_result`. `error_message` is
   separate and holds the actual exception text, populated **only** on the
-  `ERROR` path. `stats`'s CSV reports source `unavailable.csv`/
+  `ERROR` path. `checked_fingerprint` (added by migration `0003`) records the
+  `files.fingerprint` the stored verdict was computed against; `check`
+  reselects any track whose current fingerprint differs, so retagging a file
+  (adding a missing ISRC, fixing a wrong title) invalidates the old result.
+  `stats`'s CSV reports source `unavailable.csv`/
   `ambiguous.csv`'s `reason` column from `availability_results.reason`, and
   `errors.csv`'s `reason` column from `error_message` — deliberately
   different columns, because `error_message` is empty for every non-`ERROR`
@@ -154,19 +163,20 @@ import time. It is the **only** registered provider in v1 — see
 [provider-selection.md](provider-selection.md) for why Deezer was chosen and
 what's pending before Spotify becomes provider #2.
 
-**Important nuance:** `PROVIDER_REGISTRY` is populated but not yet consulted
-by the CLI. `check --provider NAME` only selects which `providers.name` row
-results are stored/looked-up under — `cli.py`'s `check` command
-unconditionally constructs `DeezerProvider(...)` and calls it, regardless of
-`--provider`'s value. Registry-driven dispatch (look up the class in
-`PROVIDER_REGISTRY` and instantiate *that*) is deferred until a second
+**Important nuance:** `PROVIDER_REGISTRY` is consulted by `check` for
+*validation* only — an unknown `--provider` name exits non-zero before any
+`providers` row is created. It does not yet drive *dispatch*: `check --provider
+NAME` otherwise only selects which `providers.name` row results are
+stored/looked-up under, and `cli.py`'s `check` unconditionally constructs
+`DeezerProvider(...)` and calls it. Registry-driven dispatch (look up the class
+in `PROVIDER_REGISTRY` and instantiate *that*) is deferred until a second
 provider actually exists to dispatch to — see `TODO.md`.
 
 ## Matching engine
 
 `matching/engine.py`'s `match_track(track, provider)` runs the three-level
 matching described in full in [matching.md](matching.md): ISRC exact,
-metadata+duration+qualifier gate, then rapidfuzz fuzzy fallback. It returns
+artist+title+duration+qualifier gate, then rapidfuzz fuzzy fallback. It returns
 a `MatchResult` (`matching/types.py`) with `state: AvailabilityState`,
 `score`, `reason`, the winning `candidate` (if any), and the full
 `all_candidates` list (used to persist ambiguous-match history).
@@ -232,8 +242,10 @@ See the README for exact commands and flags. In brief:
 
 - `scan <path>` — walks for `.mp3` files, extracts/updates `local_tracks`,
   soft-deletes files no longer found.
-- `check` — runs unchecked (or `--retry-errors`'d) tracks through the
-  matching engine against Deezer, persists results.
+- `check` — runs unchecked, retagged (fingerprint changed since the stored
+  result), or `--retry-errors`'d tracks through the matching engine against
+  Deezer, persists results. A per-track `try/except` isolates failures, so one
+  malformed provider payload can't abort the run.
 - `review` — interactive prompt over `AMBIGUOUS` tracks, records
   `manual_match_decisions`.
 - `playlist` — writes an `.m3u8` of tracks matching `--state`

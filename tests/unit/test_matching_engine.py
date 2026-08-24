@@ -139,6 +139,25 @@ def test_remaster_qualifier_is_compatible_with_plain():
     assert result.state == AvailabilityState.AVAILABLE
 
 
+def test_same_artist_same_duration_different_title_is_not_available():
+    # Deezer's search falls back to relevance: a rare B-side that genuinely isn't in
+    # the catalog still returns the artist's other tracks, and across ~25 results one
+    # will land inside the 4s duration tolerance. Artist+duration alone must not be
+    # enough to declare AVAILABLE.
+    candidate = {
+        "provider_track_id": "1",
+        "artist": "Depeche Mode",
+        "title": "Personal Jesus",
+        "album": "Violator",
+        "duration_seconds": 258.0,
+        "isrc": None,
+    }
+    local = make_track(isrc=None, duration_seconds=258.0, version_qualifiers=[])
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(local, provider)
+    assert result.state != AvailabilityState.AVAILABLE
+
+
 def test_close_fuzzy_match_with_no_duration_is_ambiguous_not_available():
     candidate = {
         "provider_track_id": "1",

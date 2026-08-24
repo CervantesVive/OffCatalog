@@ -21,6 +21,14 @@ offcatalog = "offcatalog.cli:app"
 requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"
 
+[tool.pytest.ini_options]
+markers = [
+    "manual: requires live network access to a real provider, skipped by default",
+]
+# Manual tests hit a real provider over the network — deselected by default so the
+# normal suite stays offline and deterministic. Run them with: uv run pytest -m manual
+addopts = "-m 'not manual'"
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

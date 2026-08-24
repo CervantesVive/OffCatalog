@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from offcatalog.cli import app
 from offcatalog.db.connection import get_connection
+from offcatalog.matching.types import AvailabilityState, MatchResult
 from offcatalog.providers.deezer import DeezerProvider
 
 runner = CliRunner()
@@ -134,6 +135,113 @@ def test_check_without_retry_errors_leaves_error_state_alone(tmp_path):
         )  # no --retry-errors
 
     assert "Checked 0 track(s)" in result.output
+
+
+def test_check_rejects_unknown_provider_and_creates_no_provider_row(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    result = runner.invoke(app, ["check", "--db", str(db_path), "--provider", "bogus"])
+
+    assert result.exit_code != 0
+    assert "bogus" in result.output
+    conn = get_connection(str(db_path))
+    rows = conn.execute("SELECT name FROM providers WHERE name = 'bogus'").fetchall()
+    assert rows == []
+
+
+def test_check_rechecks_track_whose_fingerprint_changed(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    def ok_handler(request):
+        if "isrc" in request.url.path:
+            return httpx.Response(200, json={"error": {"type": "DataException"}})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": 1,
+                        "title": "Enjoy the Silence",
+                        "duration": 3,
+                        "artist": {"name": "Depeche Mode"},
+                        "album": {"title": "Violator"},
+                    }
+                ]
+            },
+        )
+
+    with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(ok_handler)):
+        runner.invoke(app, ["check", "--db", str(db_path)])
+
+        conn = get_connection(str(db_path))
+        assert (
+            conn.execute("SELECT state FROM availability_results").fetchone()["state"]
+            == "AVAILABLE"
+        )
+        # A re-check without a retag is a no-op...
+        result = runner.invoke(app, ["check", "--db", str(db_path)])
+        assert "Checked 0 track(s)" in result.output
+
+        # ...but retagging the file (new fingerprint) must reselect it.
+        conn.execute("UPDATE files SET fingerprint = 'retagged'")
+        conn.commit()
+        result = runner.invoke(app, ["check", "--db", str(db_path)])
+
+    assert "Checked 1 track(s)" in result.output
+    conn = get_connection(str(db_path))
+    assert (
+        conn.execute("SELECT checked_fingerprint FROM availability_results").fetchone()[
+            "checked_fingerprint"
+        ]
+        == "retagged"
+    )
+
+
+def test_check_isolates_unexpected_per_track_failure(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    shutil.copy(FIXTURES / "live_version.mp3", music_dir / "live_version.mp3")
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    def ok_handler(request):
+        if "isrc" in request.url.path:
+            return httpx.Response(200, json={"error": {"type": "DataException"}})
+        return httpx.Response(200, json={"data": []})
+
+    unavailable = MatchResult(
+        state=AvailabilityState.UNAVAILABLE,
+        score=0.0,
+        reason="no_candidates",
+        candidate=None,
+        all_candidates=[],
+    )
+    with (
+        patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(ok_handler)),
+        patch(
+            "offcatalog.cli.match_track",
+            side_effect=[RuntimeError("unexpected boom"), unavailable],
+        ),
+    ):
+        result = runner.invoke(app, ["check", "--db", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "Checked 1 track(s), 1 error(s)" in result.output
+    conn = get_connection(str(db_path))
+    # the surviving track's result was still persisted
+    assert (
+        conn.execute("SELECT COUNT(*) AS c FROM availability_results").fetchone()["c"]
+        == 1
+    )
 
 
 def test_check_persists_progress_across_interrupted_run(tmp_path):

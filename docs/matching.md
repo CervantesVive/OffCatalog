@@ -15,17 +15,26 @@ highest-confidence path and short-circuits levels 2 and 3 entirely.
 
 **Level 2 — metadata + duration gate.** If there's no ISRC hit, the provider
 is searched by artist/title (`search_track`), and each candidate is checked
-against three gates simultaneously:
+against four gates simultaneously:
 
 - normalized artist matches exactly,
+- title similarity (`rapidfuzz.fuzz.ratio` over the two qualifier-stripped
+  base titles) is at least `minimum_confident_score` (default 92),
 - duration is within `duration_tolerance_seconds` (default 4s) of the local
   track's duration, and
 - version qualifiers are compatible (see below).
 
-The first candidate passing all three gates is `AVAILABLE`,
+The first candidate passing all four gates is `AVAILABLE`,
 `reason="meta_duration"`. Failing any one gate doesn't downgrade the
 candidate — it's simply rejected, and matching falls through to level 3 with
 the full candidate list.
+
+The title gate uses `fuzz.ratio` rather than `token_set_ratio` on purpose:
+`token_set_ratio` ignores tokens present on only one side, so `"enjoy the
+silence live"` scores 100 against `"enjoy the silence"`. Without this gate a
+provider search that returns the artist's *other* tracks (Deezer falls back
+to relevance when the exact track isn't in the catalog) could pass on
+artist + duration alone and mark a genuinely missing rare track available.
 
 **Level 3 — fuzzy.** `rapidfuzz.fuzz.token_set_ratio` scores `"{artist}
 {title}"` against every remaining candidate. The best score decides the
@@ -53,7 +62,14 @@ absence.
 Titles carry parenthetical/bracketed qualifiers — `(Live)`, `(Remastered
 2011)`, `(Hands and Feet Mix)` — that `normalize.py`'s `extract_qualifiers()`
 pulls out of the title into a separate `version_qualifiers` list rather than
-deleting them. Qualifiers are split into two classes:
+deleting them. A trailing `" - <suffix>"` (`Song - Live`, `Song - Radio
+Edit`) is recognized too, but only when the suffix matches a **known**
+qualifier in full: there's no free-text fallback for the dash form, because
+`Guns N' Roses - Live and Let Die` contains the word "live" without being a
+live version. Missing a qualifier is safe (the level-2 title gate rejects the
+pair anyway); wrongly stripping a real title is not.
+
+Qualifiers are split into two classes:
 
 - **Neutral** — stripped before the compatibility check, because they
   describe the same underlying recording: `Remaster`, `Remastered`,
@@ -88,7 +104,7 @@ Five states (`src/offcatalog/matching/types.py`):
 
 | State | Meaning |
 |---|---|
-| `AVAILABLE` | A confident match was found (ISRC exact or metadata+duration+qualifier gate). |
+| `AVAILABLE` | A confident match was found (ISRC exact, or the artist+title+duration+qualifier gate). |
 | `UNAVAILABLE` | The provider was queried and no candidate met the confidence bar — either zero candidates came back, or the best fuzzy score was below the ambiguous floor (60). |
 | `AMBIGUOUS` | A candidate looked plausible by fuzzy text similarity but didn't clear the confident-match gates — **this is the deliberate default whenever the engine is uncertain, never `AVAILABLE`.** Ambiguous results queue for human review (`offcatalog review`) rather than being auto-resolved either way. |
 | `NOT_CHECKED` | No check has been recorded yet for this track/provider pair. This is a synthetic default (`get_availability_state`) derived from the absence of an `availability_results` row — it's never written to the database directly. |

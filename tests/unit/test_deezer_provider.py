@@ -167,6 +167,27 @@ def test_malformed_json_raises_provider_error():
         provider.search_by_isrc("GBAYE9000212")
 
 
+def test_malformed_payload_missing_id_raises_provider_error():
+    def handler(request):
+        return httpx.Response(200, json={"title": "No Id Here", "duration": 100})
+
+    provider = DeezerProvider(client=_client_with(handler))
+    with pytest.raises(ProviderError):
+        provider.search_by_isrc("GBAYE9000212")
+
+
+def test_malformed_payload_null_artist_in_search_raises_provider_error():
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={"data": [{"id": 1, "title": "T", "duration": 10, "artist": None}]},
+        )
+
+    provider = DeezerProvider(client=_client_with(handler))
+    with pytest.raises(ProviderError):
+        provider.search_track(make_track())
+
+
 class _FakeRateLimiter:
     def __init__(self):
         self.calls = 0
@@ -189,3 +210,19 @@ def test_rate_limiter_wait_called_once_per_http_request():
 
     provider.search_track(make_track())
     assert limiter.calls == 2
+
+
+@pytest.mark.manual
+def test_live_deezer_search_returns_candidates():
+    """Manual smoke test against the real Deezer API — NOT run by default.
+
+    Deselected by `addopts = "-m 'not manual'"` in pyproject.toml; run it
+    deliberately with `uv run pytest -m manual`. Needs live network access, but
+    no credentials (Deezer's catalog search is unauthenticated).
+    """
+    provider = DeezerProvider()
+    candidates = provider.search_track(
+        make_track(artist="depeche mode", title="enjoy the silence")
+    )
+    assert candidates
+    assert any("silence" in c["title"].lower() for c in candidates)

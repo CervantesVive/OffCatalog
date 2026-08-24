@@ -13,6 +13,8 @@ _NEUTRAL_QUALIFIER_RE = re.compile(
 )
 
 _PAREN_GROUP_RE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
+# Trailing " - <suffix>" only, and the greedy prefix makes it the LAST such separator.
+_DASH_SUFFIX_RE = re.compile(r"^(.*\S)\s+-\s+(\S.*)$")
 _FEATURING_GROUP_RE = re.compile(r"^\s*(feat\.?|ft\.?|featuring)\b", re.IGNORECASE)
 
 _DISTINGUISHING_QUALIFIER_PATTERNS: list[tuple[str, re.Pattern]] = [
@@ -69,5 +71,29 @@ def extract_qualifiers(raw_title: str) -> ExtractedTitle:
         return " "
 
     working = _PAREN_GROUP_RE.sub(replace_group, raw_title)
+    working = _strip_dash_suffix_qualifier(working, found)
     base_title = normalize_text(working)
     return ExtractedTitle(base_title=base_title, qualifiers=found)
+
+
+def _strip_dash_suffix_qualifier(working: str, found: list[str]) -> str:
+    """Handle the dash-suffixed form: "Song - Live", "Song - Remastered 2011".
+
+    The suffix must match a known qualifier in FULL. No free-text fallback here
+    (unlike parenthetical groups): "Guns N' Roses - Live and Let Die" contains the
+    word "live" but is not a live version, and misreading it would strip the real
+    title. A missed qualifier is safe — the level-2 title-similarity gate rejects
+    the pair anyway; a wrongly stripped title is not.
+    """
+    match = _DASH_SUFFIX_RE.match(working)
+    if not match:
+        return working
+    prefix, suffix = match.group(1), match.group(2).strip()
+    if _NEUTRAL_QUALIFIER_RE.match(suffix):
+        return prefix
+    for label, pattern in _DISTINGUISHING_QUALIFIER_PATTERNS:
+        if pattern.fullmatch(suffix):
+            if label not in found:
+                found.append(label)
+            return prefix
+    return working

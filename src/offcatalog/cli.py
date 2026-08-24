@@ -9,6 +9,7 @@ from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
     compute_state_counts,
     get_availability_state,
+    get_checked_fingerprint,
     get_file_by_path,
     get_file_path_for_track,
     list_ambiguous_tracks,
@@ -25,6 +26,7 @@ from offcatalog.matching.engine import match_track
 from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
 from offcatalog.playlist import write_m3u8
+from offcatalog.providers.base import PROVIDER_REGISTRY
 from offcatalog.providers.deezer import DeezerProvider
 from offcatalog.ratelimit import TokenBucket
 from offcatalog.reports import write_csv_report
@@ -132,31 +134,60 @@ def check(
         False, "--retry-errors", help="Re-check tracks currently in ERROR state"
     ),
 ) -> None:
+    # Validate before get_connection/get_provider_id: an unknown name would otherwise
+    # be lazily INSERTed into `providers`, permanently inflating the provider count
+    # that list_unavailable_everywhere requires every track to satisfy — silently
+    # emptying every future playlist with no CLI way to undo it.
+    if provider_name not in PROVIDER_REGISTRY:
+        known = ", ".join(sorted(PROVIDER_REGISTRY))
+        typer.echo(
+            f"Unknown provider {provider_name!r}. Known providers: {known}", err=True
+        )
+        raise typer.Exit(code=1)
+
     conn = get_connection(db)
     rate_limiter = TokenBucket(rate=45, per_seconds=5.0)
     provider = DeezerProvider(rate_limiter=rate_limiter)
-    rows = conn.execute("SELECT * FROM local_tracks").fetchall()
+    rows = conn.execute(
+        "SELECT lt.*, f.fingerprint AS current_fingerprint "
+        "FROM local_tracks lt JOIN files f ON f.id = lt.file_id"
+    ).fetchall()
 
     needs_check_states = {AvailabilityState.NOT_CHECKED.value}
     if retry_errors:
         needs_check_states.add(AvailabilityState.ERROR.value)
 
     checked = 0
+    errors = 0
     for row in rows:
         if limit is not None and checked >= limit:
             break
         current_state = get_availability_state(conn, row["id"], provider_name)
-        if current_state not in needs_check_states:
+        fingerprint = row["current_fingerprint"]
+        # Retagging a file (adding a missing ISRC, fixing a wrong title — the exact
+        # corrective action this tool's reports prompt) changes its fingerprint and
+        # must invalidate the stored verdict.
+        stale = get_checked_fingerprint(conn, row["id"], provider_name) != fingerprint
+        if current_state not in needs_check_states and not stale:
             continue
-        track = _row_to_track(row)
-        result = match_track(track, provider)
-        record_check_result(conn, track.id, provider_name, result)
+        try:
+            track = _row_to_track(row)
+            result = match_track(track, provider)
+            record_check_result(
+                conn, track.id, provider_name, result, checked_fingerprint=fingerprint
+            )
+        except Exception as exc:  # noqa: BLE001 — per-track isolation: one malformed
+            # provider payload or unreadable row must not abort a multi-hour run and
+            # lose every track still unprocessed.
+            errors += 1
+            typer.echo(f"Skipping {row['artist']} - {row['title']}: {exc}", err=True)
+            continue
         typer.echo(
             f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})"
         )
         checked += 1
 
-    typer.echo(f"Checked {checked} track(s)")
+    typer.echo(f"Checked {checked} track(s), {errors} error(s)")
     conn.close()
 
 

@@ -4,9 +4,11 @@ from typer.testing import CliRunner
 from offcatalog.cli import app
 from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
+    compute_state_counts,
     get_file_path_for_track,
     list_unavailable_everywhere,
     record_check_result,
+    soft_delete_missing_files,
     upsert_file,
     upsert_local_track,
 )
@@ -153,6 +155,23 @@ def test_unavailable_everywhere_requires_all_providers_checked_and_none_availabl
     results = list_unavailable_everywhere(conn)
     ids = {row["id"] for row in results}
     assert ids == {unavailable_id}
+
+
+def test_soft_deleted_file_is_excluded_from_playlist_and_stats(tmp_path):
+    conn = get_connection(str(tmp_path / "t.db"))
+    kept_id = _seed_track(conn, "/kept.mp3", AvailabilityState.UNAVAILABLE)
+    _seed_track(conn, "/unmounted.mp3", AvailabilityState.UNAVAILABLE)
+
+    assert compute_state_counts(conn)["UNAVAILABLE"] == 2
+    soft_delete_missing_files(conn, {"/kept.mp3"})
+
+    ids = {row["id"] for row in list_unavailable_everywhere(conn)}
+    assert ids == {kept_id}
+
+    counts = compute_state_counts(conn)
+    assert counts["UNAVAILABLE"] == 1
+    assert sum(counts.values()) == 1
+    assert counts.get("NOT_CHECKED", 0) == 0
 
 
 def test_write_m3u8_produces_valid_playlist(tmp_path):

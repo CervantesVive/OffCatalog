@@ -70,6 +70,32 @@ def test_extract_qualifiers_common_words_not_mistaken_for_live():
     assert "live and let die" in result.base_title
 
 
+def test_extract_qualifiers_dash_suffix_live():
+    result = extract_qualifiers("Enjoy the Silence - Live")
+    assert result.qualifiers == ["live"]
+    assert "live" not in result.base_title
+    assert result.base_title == extract_qualifiers("Enjoy the Silence").base_title
+
+
+def test_extract_qualifiers_dash_suffix_radio_edit_and_neutral_remaster():
+    assert extract_qualifiers("Song - Radio Edit").qualifiers == ["radio edit"]
+    neutral = extract_qualifiers("Song - Remastered 2011")
+    assert neutral.qualifiers == []
+    assert neutral.base_title == "song"
+
+
+def test_extract_qualifiers_dash_suffix_does_not_misfire_on_ordinary_titles():
+    # The suffix must match a qualifier in full: "Live and Let Die" merely contains
+    # the word "live", and stripping it would destroy the real title.
+    result = extract_qualifiers("Guns N' Roses - Live and Let Die")
+    assert result.qualifiers == []
+    assert "live and let die" in result.base_title
+
+    plain = extract_qualifiers("Song - Part Two")
+    assert plain.qualifiers == []
+    assert plain.base_title == "song part two"
+
+
 def test_extract_qualifiers_regional_edition_via_free_text():
     result = extract_qualifiers("Track (UK Edition)")
     assert "uk edition" in result.qualifiers

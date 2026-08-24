@@ -60,11 +60,19 @@ class DeezerProvider:
 
     @staticmethod
     def _to_candidate(item: dict) -> ProviderCandidate:
-        return ProviderCandidate(
-            provider_track_id=str(item["id"]),
-            artist=item.get("artist", {}).get("name", ""),
-            title=item.get("title", ""),
-            album=item.get("album", {}).get("title"),
-            duration_seconds=float(item.get("duration", 0)),
-            isrc=item.get("isrc"),
-        )
+        # A payload missing "id", or carrying "artist": null, would otherwise raise
+        # KeyError/AttributeError past match_track's `except ProviderError` and abort
+        # the whole check run on one bad row.
+        try:
+            return ProviderCandidate(
+                provider_track_id=str(item["id"]),
+                artist=item.get("artist", {}).get("name", ""),
+                title=item.get("title", ""),
+                album=item.get("album", {}).get("title"),
+                duration_seconds=float(item.get("duration", 0)),
+                isrc=item.get("isrc"),
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ProviderError(
+                f"Deezer returned an unmappable track payload: {item!r}"
+            ) from exc

@@ -70,6 +70,15 @@ def _match_by_metadata(
 
     for candidate in candidates:
         artist_match = normalize_text(candidate["artist"]) == track.artist
+        # fuzz.ratio, not token_set_ratio: token_set_ratio scores "enjoy the silence
+        # live" against "enjoy the silence" at 100 because it ignores tokens present
+        # on only one side — exactly the false AVAILABLE this gate has to prevent.
+        # Both sides are qualifier-stripped base titles (track.title is already one,
+        # see scanning/extract.py).
+        title_match = (
+            fuzz.ratio(extract_qualifiers(candidate["title"]).base_title, track.title)
+            >= minimum_confident_score
+        )
         duration_ok = (
             abs(candidate["duration_seconds"] - track.duration_seconds)
             <= duration_tolerance_seconds
@@ -78,7 +87,7 @@ def _match_by_metadata(
             track.version_qualifiers, candidate["title"]
         )
 
-        if artist_match and duration_ok and qualifiers_ok:
+        if artist_match and title_match and duration_ok and qualifiers_ok:
             return MatchResult(
                 state=AvailabilityState.AVAILABLE,
                 score=1.0,

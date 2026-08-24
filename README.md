@@ -62,6 +62,9 @@ uv run offcatalog stats
 `check` accepts `--provider NAME` (default `deezer`), but note: in v1 this
 only selects which *storage key* results are recorded under — Deezer is
 always the provider actually queried, since it's the only one implemented.
+The name is validated against the provider registry, so a typo or a
+not-yet-implemented provider fails fast instead of recording results under a
+bogus provider row.
 See [`docs/provider-selection.md`](docs/provider-selection.md) and
 `TODO.md`.
 

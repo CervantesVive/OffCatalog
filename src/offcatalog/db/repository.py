@@ -122,7 +122,8 @@ def list_ambiguous_tracks(
         """
         SELECT lt.* FROM local_tracks lt
         JOIN availability_results ar ON ar.local_track_id = lt.id
-        WHERE ar.provider_id = ? AND ar.state = 'AMBIGUOUS'
+        JOIN files f ON f.id = lt.file_id
+        WHERE ar.provider_id = ? AND ar.state = 'AMBIGUOUS' AND f.deleted_at IS NULL
         """,
         (provider_id,),
     ).fetchall()
@@ -194,11 +195,22 @@ def record_check_result(
     local_track_id: str,
     provider_name: str,
     result: MatchResult,
+    checked_fingerprint: str | None = None,
 ) -> None:
+    provider_id = get_provider_id(conn, provider_name)
+
     if has_manual_decision(conn, local_track_id, provider_name):
+        # A human verdict is never overwritten — but the fingerprint this check ran
+        # against still has to be recorded, or `check` would reselect the track as
+        # stale on every subsequent run and never make progress.
+        conn.execute(
+            "UPDATE availability_results SET checked_fingerprint = ? "
+            "WHERE local_track_id = ? AND provider_id = ?",
+            (checked_fingerprint, local_track_id, provider_id),
+        )
+        conn.commit()
         return
 
-    provider_id = get_provider_id(conn, provider_name)
     best_candidate_id = None
 
     if result.candidate is not None:
@@ -250,11 +262,12 @@ def record_check_result(
 
     conn.execute(
         """
-        INSERT INTO availability_results (local_track_id, provider_id, state, best_candidate_id, checked_at, error_message, reason)
-        VALUES (?,?,?,?,?,?,?)
+        INSERT INTO availability_results (local_track_id, provider_id, state, best_candidate_id, checked_at, error_message, reason, checked_fingerprint)
+        VALUES (?,?,?,?,?,?,?,?)
         ON CONFLICT(local_track_id, provider_id) DO UPDATE SET
             state=excluded.state, best_candidate_id=excluded.best_candidate_id,
-            checked_at=excluded.checked_at, error_message=excluded.error_message, reason=excluded.reason
+            checked_at=excluded.checked_at, error_message=excluded.error_message, reason=excluded.reason,
+            checked_fingerprint=excluded.checked_fingerprint
         """,
         (
             local_track_id,
@@ -264,9 +277,22 @@ def record_check_result(
             _now(),
             result.error_message,
             result.reason,
+            checked_fingerprint,
         ),
     )
     conn.commit()
+
+
+def get_checked_fingerprint(
+    conn: sqlite3.Connection, local_track_id: str, provider_name: str
+) -> str | None:
+    """The file fingerprint the stored result was computed against, if any."""
+    provider_id = get_provider_id(conn, provider_name)
+    row = conn.execute(
+        "SELECT checked_fingerprint FROM availability_results WHERE local_track_id = ? AND provider_id = ?",
+        (local_track_id, provider_id),
+    ).fetchone()
+    return row["checked_fingerprint"] if row else None
 
 
 def list_unavailable_everywhere(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -276,7 +302,9 @@ def list_unavailable_everywhere(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         """
         SELECT lt.* FROM local_tracks lt
-        WHERE (
+        JOIN files f ON f.id = lt.file_id
+        WHERE f.deleted_at IS NULL
+        AND (
             SELECT COUNT(*) FROM availability_results ar
             WHERE ar.local_track_id = lt.id AND ar.state IN ('UNAVAILABLE', 'AMBIGUOUS')
         ) = ?
@@ -291,7 +319,8 @@ def list_unavailable_everywhere(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def get_file_path_for_track(conn: sqlite3.Connection, local_track_id: str) -> str:
     row = conn.execute(
-        "SELECT f.path FROM files f JOIN local_tracks lt ON lt.file_id = f.id WHERE lt.id = ?",
+        "SELECT f.path FROM files f JOIN local_tracks lt ON lt.file_id = f.id "
+        "WHERE lt.id = ? AND f.deleted_at IS NULL",
         (local_track_id,),
     ).fetchone()
     if row is None:
@@ -316,16 +345,22 @@ def compute_state_counts(conn: sqlite3.Connection) -> dict[str, int]:
     # NOT_CHECKED is a synthetic default (see get_availability_state) never
     # inserted as a row, so it's derived from the gap between total tracks
     # and rows actually recorded, not read via GROUP BY.
-    total_tracks = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()[
-        "c"
-    ]
+    # Soft-deleted files are excluded from both halves — counting a result whose file
+    # is gone against a total that excludes it would drive NOT_CHECKED negative.
+    total_tracks = conn.execute(
+        "SELECT COUNT(*) AS c FROM local_tracks lt "
+        "JOIN files f ON f.id = lt.file_id WHERE f.deleted_at IS NULL"
+    ).fetchone()["c"]
     provider_row = conn.execute(
         "SELECT id FROM providers ORDER BY rowid LIMIT 1"
     ).fetchone()
     if provider_row is None:
         return {"NOT_CHECKED": total_tracks} if total_tracks else {}
     rows = conn.execute(
-        "SELECT state, COUNT(*) AS c FROM availability_results WHERE provider_id = ? GROUP BY state",
+        "SELECT ar.state, COUNT(*) AS c FROM availability_results ar "
+        "JOIN local_tracks lt ON lt.id = ar.local_track_id "
+        "JOIN files f ON f.id = lt.file_id "
+        "WHERE ar.provider_id = ? AND f.deleted_at IS NULL GROUP BY ar.state",
         (provider_row["id"],),
     ).fetchall()
     counts = {row["state"]: row["c"] for row in rows}
@@ -340,7 +375,7 @@ def list_tracks_by_state(conn: sqlite3.Connection, state: str) -> list[sqlite3.R
         FROM local_tracks lt
         JOIN availability_results ar ON ar.local_track_id = lt.id
         JOIN files f ON f.id = lt.file_id
-        WHERE ar.state = ?
+        WHERE ar.state = ? AND f.deleted_at IS NULL
         """,
         (state,),
     ).fetchall()

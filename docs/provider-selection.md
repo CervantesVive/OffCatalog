@@ -64,10 +64,13 @@ Two CLI surfaces reference "provider" today but only in a limited sense:
   rows) a result is recorded under. It does **not** select which
   implementation makes the API call — v1 always calls `DeezerProvider`
   regardless of `--provider`'s value, because it's the only registered
-  provider. Passing `--provider spotify` today would record real Deezer
-  results under a `spotify` row, which is misleading; don't do that until a
-  second provider actually exists. See `TODO.md` for the registry-driven
-  dispatch work that closes this gap.
+  provider. The value **is** validated against `PROVIDER_REGISTRY` before
+  anything is written, so `--provider spotify` (or a typo like `deezr`)
+  exits non-zero rather than lazily creating a bogus `providers` row —
+  which would otherwise inflate the provider count
+  `list_unavailable_everywhere` requires and silently empty every future
+  playlist. See `TODO.md` for the registry-driven *dispatch* work that
+  closes the remaining gap.
 - `playlist` has **no** `--provider` flag in v1 — it would be a no-op with a
   single provider, so it was left out rather than shipped as dead weight.
 
