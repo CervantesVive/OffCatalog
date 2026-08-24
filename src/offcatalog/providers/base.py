@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, TypedDict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, TypedDict
 
 if TYPE_CHECKING:
     from offcatalog.models import LocalTrack
@@ -20,7 +20,7 @@ class StreamingProvider(Protocol):
 
     def search_by_isrc(self, isrc: str) -> ProviderCandidate | None: ...
 
-    def search_track(self, track: "LocalTrack") -> list[ProviderCandidate]: ...
+    def search_track(self, track: LocalTrack) -> list[ProviderCandidate]: ...
 
 
 class ProviderError(Exception):

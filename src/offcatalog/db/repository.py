@@ -4,17 +4,19 @@ import json
 import sqlite3
 import uuid
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from offcatalog.matching.types import AvailabilityState, MatchResult
 from offcatalog.models import LocalTrack
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def upsert_file(conn: sqlite3.Connection, path: str, mtime: float, size: int, fingerprint: str) -> str:
+def upsert_file(
+    conn: sqlite3.Connection, path: str, mtime: float, size: int, fingerprint: str
+) -> str:
     existing = conn.execute("SELECT id FROM files WHERE path = ?", (path,)).fetchone()
     if existing:
         conn.execute(
@@ -33,7 +35,9 @@ def upsert_file(conn: sqlite3.Connection, path: str, mtime: float, size: int, fi
     return file_id
 
 
-def upsert_local_track(conn: sqlite3.Connection, file_id: str, track: LocalTrack) -> None:
+def upsert_local_track(
+    conn: sqlite3.Connection, file_id: str, track: LocalTrack
+) -> None:
     # A file has at most one local_tracks row. extract_local_track() assigns a fresh
     # random id on every call, so reuse the existing row's id (if any) for this file_id
     # rather than track.id, otherwise every re-scan of an unchanged file would insert a
@@ -60,10 +64,21 @@ def upsert_local_track(conn: sqlite3.Connection, file_id: str, track: LocalTrack
             raw_tags_json=excluded.raw_tags_json
         """,
         (
-            track_id, file_id, track.artist, track.album_artist, track.title, track.album,
-            json.dumps(track.version_qualifiers), track.track_number, track.disc_number,
-            track.duration_seconds, track.year, track.isrc, track.musicbrainz_track_id,
-            track.musicbrainz_recording_id, json.dumps(asdict(track.raw)),
+            track_id,
+            file_id,
+            track.artist,
+            track.album_artist,
+            track.title,
+            track.album,
+            json.dumps(track.version_qualifiers),
+            track.track_number,
+            track.disc_number,
+            track.duration_seconds,
+            track.year,
+            track.isrc,
+            track.musicbrainz_track_id,
+            track.musicbrainz_recording_id,
+            json.dumps(asdict(track.raw)),
         ),
     )
     conn.commit()
@@ -75,11 +90,15 @@ def get_file_by_path(conn: sqlite3.Connection, path: str) -> sqlite3.Row | None:
 
 
 def soft_delete_missing_files(conn: sqlite3.Connection, seen_paths: set[str]) -> int:
-    rows = conn.execute("SELECT id, path FROM files WHERE deleted_at IS NULL").fetchall()
+    rows = conn.execute(
+        "SELECT id, path FROM files WHERE deleted_at IS NULL"
+    ).fetchall()
     deleted = 0
     for row in rows:
         if row["path"] not in seen_paths:
-            conn.execute("UPDATE files SET deleted_at = ? WHERE id = ?", (_now(), row["id"]))
+            conn.execute(
+                "UPDATE files SET deleted_at = ? WHERE id = ?", (_now(), row["id"])
+            )
             deleted += 1
     conn.commit()
     return deleted
@@ -95,7 +114,9 @@ def get_provider_id(conn: sqlite3.Connection, name: str) -> str:
     return provider_id
 
 
-def list_ambiguous_tracks(conn: sqlite3.Connection, provider_name: str) -> list[sqlite3.Row]:
+def list_ambiguous_tracks(
+    conn: sqlite3.Connection, provider_name: str
+) -> list[sqlite3.Row]:
     provider_id = get_provider_id(conn, provider_name)
     return conn.execute(
         """
@@ -107,7 +128,9 @@ def list_ambiguous_tracks(conn: sqlite3.Connection, provider_name: str) -> list[
     ).fetchall()
 
 
-def list_candidates_for_track(conn: sqlite3.Connection, local_track_id: str, provider_name: str) -> list[sqlite3.Row]:
+def list_candidates_for_track(
+    conn: sqlite3.Connection, local_track_id: str, provider_name: str
+) -> list[sqlite3.Row]:
     provider_id = get_provider_id(conn, provider_name)
     return conn.execute(
         "SELECT * FROM provider_candidates WHERE local_track_id = ? AND provider_id = ? ORDER BY checked_at DESC",
@@ -115,7 +138,9 @@ def list_candidates_for_track(conn: sqlite3.Connection, local_track_id: str, pro
     ).fetchall()
 
 
-def has_manual_decision(conn: sqlite3.Connection, local_track_id: str, provider_name: str) -> bool:
+def has_manual_decision(
+    conn: sqlite3.Connection, local_track_id: str, provider_name: str
+) -> bool:
     provider_id = get_provider_id(conn, provider_name)
     row = conn.execute(
         """
@@ -129,7 +154,12 @@ def has_manual_decision(conn: sqlite3.Connection, local_track_id: str, provider_
     return row is not None
 
 
-def record_manual_decision(conn: sqlite3.Connection, local_track_id: str, provider_candidate_id: str, decision: str) -> None:
+def record_manual_decision(
+    conn: sqlite3.Connection,
+    local_track_id: str,
+    provider_candidate_id: str,
+    decision: str,
+) -> None:
     conn.execute(
         """
         INSERT INTO manual_match_decisions (local_track_id, provider_candidate_id, decision, decided_at)
@@ -141,19 +171,30 @@ def record_manual_decision(conn: sqlite3.Connection, local_track_id: str, provid
     )
     if decision == "same_recording":
         candidate_row = conn.execute(
-            "SELECT provider_id FROM provider_candidates WHERE id = ?", (provider_candidate_id,)
+            "SELECT provider_id FROM provider_candidates WHERE id = ?",
+            (provider_candidate_id,),
         ).fetchone()
         conn.execute(
             """
             UPDATE availability_results SET state='AVAILABLE', best_candidate_id=?, checked_at=?
             WHERE local_track_id=? AND provider_id=?
             """,
-            (provider_candidate_id, _now(), local_track_id, candidate_row["provider_id"]),
+            (
+                provider_candidate_id,
+                _now(),
+                local_track_id,
+                candidate_row["provider_id"],
+            ),
         )
     conn.commit()
 
 
-def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_name: str, result: MatchResult) -> None:
+def record_check_result(
+    conn: sqlite3.Connection,
+    local_track_id: str,
+    provider_name: str,
+    result: MatchResult,
+) -> None:
     if has_manual_decision(conn, local_track_id, provider_name):
         return
 
@@ -170,10 +211,17 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
-                best_candidate_id, local_track_id, provider_id,
-                result.candidate["provider_track_id"], result.candidate["artist"],
-                result.candidate["title"], result.candidate.get("album"),
-                result.candidate["duration_seconds"], result.score, result.reason, _now(),
+                best_candidate_id,
+                local_track_id,
+                provider_id,
+                result.candidate["provider_track_id"],
+                result.candidate["artist"],
+                result.candidate["title"],
+                result.candidate.get("album"),
+                result.candidate["duration_seconds"],
+                result.score,
+                result.reason,
+                _now(),
             ),
         )
     elif result.state == AvailabilityState.AMBIGUOUS:
@@ -186,10 +234,17 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
-                    str(uuid.uuid4()), local_track_id, provider_id,
-                    candidate["provider_track_id"], candidate["artist"],
-                    candidate["title"], candidate.get("album"),
-                    candidate["duration_seconds"], result.score, result.reason, _now(),
+                    str(uuid.uuid4()),
+                    local_track_id,
+                    provider_id,
+                    candidate["provider_track_id"],
+                    candidate["artist"],
+                    candidate["title"],
+                    candidate.get("album"),
+                    candidate["duration_seconds"],
+                    result.score,
+                    result.reason,
+                    _now(),
                 ),
             )
 
@@ -201,7 +256,15 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
             state=excluded.state, best_candidate_id=excluded.best_candidate_id,
             checked_at=excluded.checked_at, error_message=excluded.error_message, reason=excluded.reason
         """,
-        (local_track_id, provider_id, result.state.value, best_candidate_id, _now(), result.error_message, result.reason),
+        (
+            local_track_id,
+            provider_id,
+            result.state.value,
+            best_candidate_id,
+            _now(),
+            result.error_message,
+            result.reason,
+        ),
     )
     conn.commit()
 
@@ -236,7 +299,9 @@ def get_file_path_for_track(conn: sqlite3.Connection, local_track_id: str) -> st
     return row["path"]
 
 
-def get_availability_state(conn: sqlite3.Connection, local_track_id: str, provider_name: str) -> str:
+def get_availability_state(
+    conn: sqlite3.Connection, local_track_id: str, provider_name: str
+) -> str:
     provider_id = get_provider_id(conn, provider_name)
     row = conn.execute(
         "SELECT state FROM availability_results WHERE local_track_id = ? AND provider_id = ?",
@@ -251,8 +316,12 @@ def compute_state_counts(conn: sqlite3.Connection) -> dict[str, int]:
     # NOT_CHECKED is a synthetic default (see get_availability_state) never
     # inserted as a row, so it's derived from the gap between total tracks
     # and rows actually recorded, not read via GROUP BY.
-    total_tracks = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()["c"]
-    provider_row = conn.execute("SELECT id FROM providers ORDER BY rowid LIMIT 1").fetchone()
+    total_tracks = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()[
+        "c"
+    ]
+    provider_row = conn.execute(
+        "SELECT id FROM providers ORDER BY rowid LIMIT 1"
+    ).fetchone()
     if provider_row is None:
         return {"NOT_CHECKED": total_tracks} if total_tracks else {}
     rows = conn.execute(

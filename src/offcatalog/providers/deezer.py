@@ -5,7 +5,11 @@ import json
 import httpx
 
 from offcatalog.models import LocalTrack
-from offcatalog.providers.base import ProviderCandidate, ProviderError, register_provider
+from offcatalog.providers.base import (
+    ProviderCandidate,
+    ProviderError,
+    register_provider,
+)
 
 _NOT_FOUND_ERROR_TYPE = "DataException"
 
@@ -50,7 +54,9 @@ class DeezerProvider:
         except httpx.HTTPError as exc:
             raise ProviderError(f"Deezer request to {path} failed: {exc}") from exc
         except json.JSONDecodeError as exc:
-            raise ProviderError(f"Deezer request to {path} returned malformed JSON: {exc}") from exc
+            raise ProviderError(
+                f"Deezer request to {path} returned malformed JSON: {exc}"
+            ) from exc
 
     @staticmethod
     def _to_candidate(item: dict) -> ProviderCandidate:

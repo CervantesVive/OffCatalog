@@ -7,7 +7,8 @@ def test_package_has_version():
 
 
 def test_cli_app_importable():
-    from offcatalog.cli import app
     import typer
+
+    from offcatalog.cli import app
 
     assert isinstance(app, typer.Typer)

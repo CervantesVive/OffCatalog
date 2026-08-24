@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
@@ -20,7 +20,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS schema_migrations "
         "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
     )
-    applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
+    applied = {
+        row["version"] for row in conn.execute("SELECT version FROM schema_migrations")
+    }
 
     # Validate for duplicate version numbers before executing any DDL
     migration_files = sorted(_MIGRATIONS_DIR.glob("*.sql"))
@@ -41,6 +43,6 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         conn.executescript(migration_file.read_text())
         conn.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-            (version, datetime.now(timezone.utc).isoformat()),
+            (version, datetime.now(UTC).isoformat()),
         )
         conn.commit()

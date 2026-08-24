@@ -7,14 +7,25 @@ from offcatalog.providers.deezer import DeezerProvider
 
 
 def make_track(**overrides) -> LocalTrack:
-    base = dict(
-        id="t1", path="/x.mp3", filename="x.mp3",
-        raw=RawTags(None, None, None, None, None, None, None, None, None, None),
-        artist="depeche mode", album_artist=None, title="enjoy the silence",
-        album="violator", version_qualifiers=[], track_number=None, disc_number=None,
-        duration_seconds=258.0, year=None, isrc=None,
-        musicbrainz_track_id=None, musicbrainz_recording_id=None, fingerprint="fp",
-    )
+    base = {
+        "id": "t1",
+        "path": "/x.mp3",
+        "filename": "x.mp3",
+        "raw": RawTags(None, None, None, None, None, None, None, None, None, None),
+        "artist": "depeche mode",
+        "album_artist": None,
+        "title": "enjoy the silence",
+        "album": "violator",
+        "version_qualifiers": [],
+        "track_number": None,
+        "disc_number": None,
+        "duration_seconds": 258.0,
+        "year": None,
+        "isrc": None,
+        "musicbrainz_track_id": None,
+        "musicbrainz_recording_id": None,
+        "fingerprint": "fp",
+    }
     base.update(overrides)
     return LocalTrack(**base)
 
@@ -27,11 +38,17 @@ def _client_with(handler) -> httpx.Client:
 def test_search_by_isrc_returns_candidate():
     def handler(request):
         assert request.url.path == "/track/isrc:GBAYE9000212"
-        return httpx.Response(200, json={
-            "id": 123, "title": "Enjoy the Silence", "duration": 258,
-            "isrc": "GBAYE9000212",
-            "artist": {"name": "Depeche Mode"}, "album": {"title": "Violator"},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "id": 123,
+                "title": "Enjoy the Silence",
+                "duration": 258,
+                "isrc": "GBAYE9000212",
+                "artist": {"name": "Depeche Mode"},
+                "album": {"title": "Violator"},
+            },
+        )
 
     provider = DeezerProvider(client=_client_with(handler))
     candidate = provider.search_by_isrc("GBAYE9000212")
@@ -42,7 +59,9 @@ def test_search_by_isrc_returns_candidate():
 
 def test_search_by_isrc_returns_none_when_not_found():
     def handler(request):
-        return httpx.Response(200, json={"error": {"type": "DataException", "message": "no data"}})
+        return httpx.Response(
+            200, json={"error": {"type": "DataException", "message": "no data"}}
+        )
 
     provider = DeezerProvider(client=_client_with(handler))
     assert provider.search_by_isrc("ZZZZZZZZZZZZ") is None
@@ -51,10 +70,20 @@ def test_search_by_isrc_returns_none_when_not_found():
 def test_search_track_returns_candidates():
     def handler(request):
         assert request.url.path == "/search"
-        return httpx.Response(200, json={"data": [
-            {"id": 1, "title": "Enjoy the Silence", "duration": 258,
-             "artist": {"name": "Depeche Mode"}, "album": {"title": "Violator"}},
-        ]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": 1,
+                        "title": "Enjoy the Silence",
+                        "duration": 258,
+                        "artist": {"name": "Depeche Mode"},
+                        "album": {"title": "Violator"},
+                    },
+                ]
+            },
+        )
 
     provider = DeezerProvider(client=_client_with(handler))
     candidates = provider.search_track(make_track())
@@ -73,7 +102,9 @@ def test_network_failure_raises_provider_error():
 
 def test_search_by_isrc_raises_on_non_not_found_api_error():
     def handler(request):
-        return httpx.Response(200, json={"error": {"type": "QuotaException", "message": "rate limited"}})
+        return httpx.Response(
+            200, json={"error": {"type": "QuotaException", "message": "rate limited"}}
+        )
 
     provider = DeezerProvider(client=_client_with(handler))
     with pytest.raises(ProviderError):
@@ -82,7 +113,9 @@ def test_search_by_isrc_raises_on_non_not_found_api_error():
 
 def test_search_track_raises_on_non_not_found_api_error():
     def handler(request):
-        return httpx.Response(200, json={"error": {"type": "QuotaException", "message": "rate limited"}})
+        return httpx.Response(
+            200, json={"error": {"type": "QuotaException", "message": "rate limited"}}
+        )
 
     provider = DeezerProvider(client=_client_with(handler))
     with pytest.raises(ProviderError):

@@ -53,7 +53,9 @@ def extract_qualifiers(raw_title: str) -> ExtractedTitle:
         if not group_text:
             return match.group(0)
         if _FEATURING_GROUP_RE.match(group_text):
-            return match.group(0)  # artist-credit parenthetical, not a version qualifier — leave untouched
+            return match.group(
+                0
+            )  # artist-credit parenthetical, not a version qualifier — leave untouched
         if _NEUTRAL_QUALIFIER_RE.match(group_text):
             return " "
         for label, pattern in _DISTINGUISHING_QUALIFIER_PATTERNS:

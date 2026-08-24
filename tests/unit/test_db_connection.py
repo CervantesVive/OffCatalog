@@ -7,21 +7,33 @@ from offcatalog.db.connection import get_connection
 def test_get_connection_applies_migrations(tmp_path):
     db_path = str(tmp_path / "test.db")
     conn = get_connection(db_path)
-    tables = {row["name"] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    )}
-    assert {"files", "local_tracks", "providers", "provider_candidates",
-            "availability_results", "manual_match_decisions", "scan_runs",
-            "schema_migrations"} <= tables
+    tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    assert {
+        "files",
+        "local_tracks",
+        "providers",
+        "provider_candidates",
+        "availability_results",
+        "manual_match_decisions",
+        "scan_runs",
+        "schema_migrations",
+    } <= tables
     conn.close()
 
 
 def test_get_connection_is_idempotent(tmp_path):
     db_path = str(tmp_path / "test.db")
     first = get_connection(db_path)
-    expected = first.execute("SELECT COUNT(*) AS c FROM schema_migrations").fetchone()["c"]
+    expected = first.execute("SELECT COUNT(*) AS c FROM schema_migrations").fetchone()[
+        "c"
+    ]
     first.close()
-    conn = get_connection(db_path)  # must not error re-applying, and must not re-insert rows
+    conn = get_connection(
+        db_path
+    )  # must not error re-applying, and must not re-insert rows
     count = conn.execute("SELECT COUNT(*) AS c FROM schema_migrations").fetchone()["c"]
     assert count == expected
     conn.close()
@@ -34,8 +46,12 @@ def test_duplicate_migration_versions_raises_error(tmp_path, monkeypatch):
     migrations_dir.mkdir()
 
     # Write two migrations with the same version prefix
-    (migrations_dir / "0001_a.sql").write_text("CREATE TABLE test_table_a (id INTEGER);")
-    (migrations_dir / "0001_b.sql").write_text("CREATE TABLE test_table_b (id INTEGER);")
+    (migrations_dir / "0001_a.sql").write_text(
+        "CREATE TABLE test_table_a (id INTEGER);"
+    )
+    (migrations_dir / "0001_b.sql").write_text(
+        "CREATE TABLE test_table_b (id INTEGER);"
+    )
 
     # Create a test database in a different location
     db_path = str(tmp_path / "test.db")
@@ -49,10 +65,14 @@ def test_duplicate_migration_versions_raises_error(tmp_path, monkeypatch):
 
     # Verify no user-created tables exist (only schema_migrations from the CREATE TABLE IF NOT EXISTS)
     import sqlite3
+
     conn = sqlite3.connect(db_path)
-    tables = {row[0] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()}
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
     conn.close()
 
     # Only schema_migrations should exist; test tables should NOT exist

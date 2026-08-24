@@ -26,8 +26,8 @@ from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
 from offcatalog.playlist import write_m3u8
 from offcatalog.providers.deezer import DeezerProvider
-from offcatalog.reports import write_csv_report
 from offcatalog.ratelimit import TokenBucket
+from offcatalog.reports import write_csv_report
 from offcatalog.scanning.extract import extract_local_track
 
 app = typer.Typer(help="Scan an MP3 collection and find tracks not on streaming.")
@@ -36,11 +36,20 @@ app = typer.Typer(help="Scan an MP3 collection and find tracks not on streaming.
 def _row_to_track(row) -> LocalTrack:
     raw = json.loads(row["raw_tags_json"])
     return LocalTrack(
-        id=row["id"], path="", filename="", raw=RawTags(**raw),
-        artist=row["artist"], album_artist=row["album_artist"], title=row["title"],
-        album=row["album"], version_qualifiers=json.loads(row["version_qualifiers"]),
-        track_number=row["track_number"], disc_number=row["disc_number"],
-        duration_seconds=row["duration_seconds"], year=row["year"], isrc=row["isrc"],
+        id=row["id"],
+        path="",
+        filename="",
+        raw=RawTags(**raw),
+        artist=row["artist"],
+        album_artist=row["album_artist"],
+        title=row["title"],
+        album=row["album"],
+        version_qualifiers=json.loads(row["version_qualifiers"]),
+        track_number=row["track_number"],
+        disc_number=row["disc_number"],
+        duration_seconds=row["duration_seconds"],
+        year=row["year"],
+        isrc=row["isrc"],
         musicbrainz_track_id=row["musicbrainz_track_id"],
         musicbrainz_recording_id=row["musicbrainz_recording_id"],
         fingerprint="",
@@ -55,7 +64,12 @@ def _main() -> None:
 @app.command()
 def scan(
     path: str = typer.Argument(".", help="Directory to scan for .mp3 files"),
-    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
+    db: str = typer.Option(
+        "offcatalog.db",
+        "--db",
+        envvar="OFFCATALOG_DB",
+        help="Path to the SQLite database",
+    ),
 ) -> None:
     conn = get_connection(db)
     added = 0
@@ -82,9 +96,13 @@ def scan(
                     continue
 
                 track = extract_local_track(file_path)
-                file_id = upsert_file(conn, file_path, stat.st_mtime, stat.st_size, track.fingerprint)
+                file_id = upsert_file(
+                    conn, file_path, stat.st_mtime, stat.st_size, track.fingerprint
+                )
                 upsert_local_track(conn, file_id, track)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — per-file isolation: one corrupt/unreadable
+                # MP3 anywhere in a 15k+ track tree must not abort the whole scan; mutagen and
+                # the stdlib can raise many distinct exception types for a bad file.
                 errors += 1
                 typer.echo(f"Skipping {file_path}: {exc}", err=True)
                 continue
@@ -98,10 +116,21 @@ def scan(
 
 @app.command()
 def check(
-    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
-    limit: int | None = typer.Option(None, "--limit", help="Max tracks to check this run"),
-    provider_name: str = typer.Option("deezer", "--provider", help="Provider to check against"),
-    retry_errors: bool = typer.Option(False, "--retry-errors", help="Re-check tracks currently in ERROR state"),
+    db: str = typer.Option(
+        "offcatalog.db",
+        "--db",
+        envvar="OFFCATALOG_DB",
+        help="Path to the SQLite database",
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Max tracks to check this run"
+    ),
+    provider_name: str = typer.Option(
+        "deezer", "--provider", help="Provider to check against"
+    ),
+    retry_errors: bool = typer.Option(
+        False, "--retry-errors", help="Re-check tracks currently in ERROR state"
+    ),
 ) -> None:
     conn = get_connection(db)
     rate_limiter = TokenBucket(rate=45, per_seconds=5.0)
@@ -122,7 +151,9 @@ def check(
         track = _row_to_track(row)
         result = match_track(track, provider)
         record_check_result(conn, track.id, provider_name, result)
-        typer.echo(f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})")
+        typer.echo(
+            f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})"
+        )
         checked += 1
 
     typer.echo(f"Checked {checked} track(s)")
@@ -131,14 +162,23 @@ def check(
 
 @app.command()
 def review(
-    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
-    provider_name: str = typer.Option("deezer", "--provider", help="Provider whose ambiguous matches to review"),
+    db: str = typer.Option(
+        "offcatalog.db",
+        "--db",
+        envvar="OFFCATALOG_DB",
+        help="Path to the SQLite database",
+    ),
+    provider_name: str = typer.Option(
+        "deezer", "--provider", help="Provider whose ambiguous matches to review"
+    ),
 ) -> None:
     conn = get_connection(db)
     tracks = list_ambiguous_tracks(conn, provider_name)
 
     for track_row in tracks:
-        typer.echo(f"\nLocal:  {track_row['artist']} - {track_row['title']} ({track_row['duration_seconds']}s)")
+        typer.echo(
+            f"\nLocal:  {track_row['artist']} - {track_row['title']} ({track_row['duration_seconds']}s)"
+        )
         candidates = list_candidates_for_track(conn, track_row["id"], provider_name)
         for i, candidate in enumerate(candidates):
             typer.echo(
@@ -149,20 +189,35 @@ def review(
         choice = typer.prompt("[s]ame / [d]ifferent / [k]ip", default="k")
         if choice in ("s", "d") and candidates:
             if len(candidates) > 1:
-                index = int(typer.prompt(f"Which candidate? [0-{len(candidates) - 1}]", default="0"))
+                index = int(
+                    typer.prompt(
+                        f"Which candidate? [0-{len(candidates) - 1}]", default="0"
+                    )
+                )
             else:
                 index = 0
             decision = "same_recording" if choice == "s" else "different_recording"
-            record_manual_decision(conn, track_row["id"], candidates[index]["id"], decision)
+            record_manual_decision(
+                conn, track_row["id"], candidates[index]["id"], decision
+            )
 
     conn.close()
 
 
 @app.command()
 def playlist(
-    db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database"),
-    state: str = typer.Option("unavailable_everywhere", "--state", help="unavailable_everywhere | ambiguous"),
-    output: str = typer.Option("playlists/not-on-streaming.m3u8", "--output", help="Output .m3u8 path"),
+    db: str = typer.Option(
+        "offcatalog.db",
+        "--db",
+        envvar="OFFCATALOG_DB",
+        help="Path to the SQLite database",
+    ),
+    state: str = typer.Option(
+        "unavailable_everywhere", "--state", help="unavailable_everywhere | ambiguous"
+    ),
+    output: str = typer.Option(
+        "playlists/not-on-streaming.m3u8", "--output", help="Output .m3u8 path"
+    ),
 ) -> None:
     conn = get_connection(db)
     if state == "ambiguous":
@@ -177,7 +232,14 @@ def playlist(
 
 
 @app.command()
-def stats(db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB", help="Path to the SQLite database")) -> None:
+def stats(
+    db: str = typer.Option(
+        "offcatalog.db",
+        "--db",
+        envvar="OFFCATALOG_DB",
+        help="Path to the SQLite database",
+    ),
+) -> None:
     conn = get_connection(db)
     counts = compute_state_counts(conn)
     total = sum(counts.values())
@@ -189,7 +251,9 @@ def stats(db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB"
     for row in conn.execute("SELECT version_qualifiers FROM local_tracks"):
         qualifier_counts.update(json.loads(row["version_qualifiers"]))
     if qualifier_counts:
-        typer.echo("\nCommon categories (heuristic, based on detected version qualifiers):")
+        typer.echo(
+            "\nCommon categories (heuristic, based on detected version qualifiers):"
+        )
         for label, count in qualifier_counts.most_common(5):
             typer.echo(f"  {label}: {count}")
 
@@ -204,9 +268,13 @@ def stats(db: str = typer.Option("offcatalog.db", "--db", envvar="OFFCATALOG_DB"
     ]:
         rows = [
             {
-                "artist": r["artist"], "title": r["title"], "album": r["album"],
-                "duration": r["duration_seconds"], "path": r["file_path"],
-                "last_checked": r["checked_at"], "reason": r[reason_column] or "",
+                "artist": r["artist"],
+                "title": r["title"],
+                "album": r["album"],
+                "duration": r["duration_seconds"],
+                "path": r["file_path"],
+                "last_checked": r["checked_at"],
+                "reason": r[reason_column] or "",
             }
             for r in list_tracks_by_state(conn, state)
         ]

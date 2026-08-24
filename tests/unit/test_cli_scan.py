@@ -82,10 +82,13 @@ def test_scan_skips_unchanged_file_without_reextracting(tmp_path, monkeypatch):
 
     calls = []
     import offcatalog.cli as cli_module
+
     original = cli_module.extract_local_track
+
     def spy(path):
         calls.append(path)
         return original(path)
+
     monkeypatch.setattr(cli_module, "extract_local_track", spy)
 
     runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
@@ -104,7 +107,9 @@ def test_scan_soft_deletes_missing_file(tmp_path):
     runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
 
     conn = get_connection(str(db_path))
-    row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
+    row = conn.execute(
+        "SELECT deleted_at FROM files WHERE path = ?", (str(target),)
+    ).fetchone()
     assert row["deleted_at"] is not None
 
 
@@ -122,7 +127,9 @@ def test_scan_undeletes_file_that_reappears_unchanged(tmp_path):
     runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
 
     conn = get_connection(str(db_path))
-    row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
+    row = conn.execute(
+        "SELECT deleted_at FROM files WHERE path = ?", (str(target),)
+    ).fetchone()
     assert row["deleted_at"] is not None
 
     # Restore the same file with identical content, mtime, and size (e.g. a
@@ -132,5 +139,7 @@ def test_scan_undeletes_file_that_reappears_unchanged(tmp_path):
     runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
 
     conn = get_connection(str(db_path))
-    row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
+    row = conn.execute(
+        "SELECT deleted_at FROM files WHERE path = ?", (str(target),)
+    ).fetchone()
     assert row["deleted_at"] is None

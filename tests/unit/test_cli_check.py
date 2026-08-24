@@ -15,9 +15,13 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 def _fake_deezer(handler):
     def factory(*args, **kwargs):
-        return DeezerProvider(client=httpx.Client(
-            transport=httpx.MockTransport(handler), base_url="https://api.deezer.com"
-        ))
+        return DeezerProvider(
+            client=httpx.Client(
+                transport=httpx.MockTransport(handler),
+                base_url="https://api.deezer.com",
+            )
+        )
+
     return factory
 
 
@@ -31,13 +35,23 @@ def test_check_stores_available_result(tmp_path):
     def handler(request):
         if "isrc" in request.url.path:
             return httpx.Response(200, json={"error": {"type": "DataException"}})
-        return httpx.Response(200, json={"data": [{
-            # plain_version.mp3 is a synthetic ~3s silent fixture (see
-            # tests/fixtures/README.md), not the real 258s song — duration
-            # here must fall within match_track's 4s tolerance of that.
-            "id": 1, "title": "Enjoy the Silence", "duration": 3,
-            "artist": {"name": "Depeche Mode"}, "album": {"title": "Violator"},
-        }]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        # plain_version.mp3 is a synthetic ~3s silent fixture (see
+                        # tests/fixtures/README.md), not the real 258s song — duration
+                        # here must fall within match_track's 4s tolerance of that.
+                        "id": 1,
+                        "title": "Enjoy the Silence",
+                        "duration": 3,
+                        "artist": {"name": "Depeche Mode"},
+                        "album": {"title": "Violator"},
+                    }
+                ]
+            },
+        )
 
     with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(handler)):
         result = runner.invoke(app, ["check", "--db", str(db_path)])
@@ -58,29 +72,47 @@ def test_check_retry_errors_rechecks_error_state(tmp_path):
     def failing_handler(request):
         raise httpx.ConnectTimeout("timeout", request=request)
 
-    with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(failing_handler)):
+    with patch(
+        "offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(failing_handler)
+    ):
         runner.invoke(app, ["check", "--db", str(db_path)])
 
     conn = get_connection(str(db_path))
-    assert conn.execute("SELECT state FROM availability_results").fetchone()["state"] == "ERROR"
+    assert (
+        conn.execute("SELECT state FROM availability_results").fetchone()["state"]
+        == "ERROR"
+    )
 
     def ok_handler(request):
         if "isrc" in request.url.path:
             return httpx.Response(200, json={"error": {"type": "DataException"}})
-        return httpx.Response(200, json={"data": [{
-            # plain_version.mp3 is a synthetic ~3s silent fixture (see
-            # tests/fixtures/README.md), not a real song — duration here
-            # must fall within match_track's 4s tolerance of that.
-            "id": 1, "title": "Enjoy the Silence", "duration": 3,
-            "artist": {"name": "Depeche Mode"}, "album": {"title": "Violator"},
-        }]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        # plain_version.mp3 is a synthetic ~3s silent fixture (see
+                        # tests/fixtures/README.md), not a real song — duration here
+                        # must fall within match_track's 4s tolerance of that.
+                        "id": 1,
+                        "title": "Enjoy the Silence",
+                        "duration": 3,
+                        "artist": {"name": "Depeche Mode"},
+                        "album": {"title": "Violator"},
+                    }
+                ]
+            },
+        )
 
     with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(ok_handler)):
         result = runner.invoke(app, ["check", "--db", str(db_path), "--retry-errors"])
 
     assert result.exit_code == 0, result.output
     conn = get_connection(str(db_path))
-    assert conn.execute("SELECT state FROM availability_results").fetchone()["state"] == "AVAILABLE"
+    assert (
+        conn.execute("SELECT state FROM availability_results").fetchone()["state"]
+        == "AVAILABLE"
+    )
 
 
 def test_check_without_retry_errors_leaves_error_state_alone(tmp_path):
@@ -93,9 +125,13 @@ def test_check_without_retry_errors_leaves_error_state_alone(tmp_path):
     def failing_handler(request):
         raise httpx.ConnectTimeout("timeout", request=request)
 
-    with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(failing_handler)):
+    with patch(
+        "offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(failing_handler)
+    ):
         runner.invoke(app, ["check", "--db", str(db_path)])
-        result = runner.invoke(app, ["check", "--db", str(db_path)])  # no --retry-errors
+        result = runner.invoke(
+            app, ["check", "--db", str(db_path)]
+        )  # no --retry-errors
 
     assert "Checked 0 track(s)" in result.output
 
@@ -117,5 +153,9 @@ def test_check_persists_progress_across_interrupted_run(tmp_path):
         runner.invoke(app, ["check", "--db", str(db_path), "--limit", "1"])
 
     conn = get_connection(str(db_path))
-    checked_count = conn.execute("SELECT COUNT(*) AS c FROM availability_results").fetchone()["c"]
-    assert checked_count == 1  # first track's result persisted even though run was limited/interrupted
+    checked_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM availability_results"
+    ).fetchone()["c"]
+    assert (
+        checked_count == 1
+    )  # first track's result persisted even though run was limited/interrupted

@@ -11,7 +11,10 @@ def test_availability_state_values():
 
 def test_match_result_defaults():
     result = MatchResult(
-        state=AvailabilityState.UNAVAILABLE, score=0.0, reason="no_candidates",
-        candidate=None, all_candidates=[],
+        state=AvailabilityState.UNAVAILABLE,
+        score=0.0,
+        reason="no_candidates",
+        candidate=None,
+        all_candidates=[],
     )
     assert result.error_message is None

@@ -16,17 +16,36 @@ from offcatalog.reports import write_csv_report
 def _seed(conn, path, state, qualifiers=None, reason="t", error_message=None):
     raw = RawTags("A", "T", None, None, None, None, None, None, None, None)
     track = LocalTrack(
-        id=path, path=path, filename=path, raw=raw, artist="a", album_artist=None,
-        title="t", album=None, version_qualifiers=qualifiers or [], track_number=None,
-        disc_number=None, duration_seconds=200.0, year=None, isrc=None,
-        musicbrainz_track_id=None, musicbrainz_recording_id=None, fingerprint=path,
+        id=path,
+        path=path,
+        filename=path,
+        raw=raw,
+        artist="a",
+        album_artist=None,
+        title="t",
+        album=None,
+        version_qualifiers=qualifiers or [],
+        track_number=None,
+        disc_number=None,
+        duration_seconds=200.0,
+        year=None,
+        isrc=None,
+        musicbrainz_track_id=None,
+        musicbrainz_recording_id=None,
+        fingerprint=path,
     )
     file_id = upsert_file(conn, path, 1.0, 1, path)
     upsert_local_track(conn, file_id, track)
     record_check_result(
-        conn, track.id, "deezer",
+        conn,
+        track.id,
+        "deezer",
         MatchResult(
-            state=state, score=0.0, reason=reason, candidate=None, all_candidates=[],
+            state=state,
+            score=0.0,
+            reason=reason,
+            candidate=None,
+            all_candidates=[],
             error_message=error_message,
         ),
     )
@@ -59,10 +78,23 @@ def test_compute_state_counts_derives_not_checked_from_unchecked_tracks(tmp_path
     # any provider — no availability_results row exists for it.
     raw = RawTags("A", "T", None, None, None, None, None, None, None, None)
     track = LocalTrack(
-        id="/c.mp3", path="/c.mp3", filename="/c.mp3", raw=raw, artist="a", album_artist=None,
-        title="t", album=None, version_qualifiers=[], track_number=None,
-        disc_number=None, duration_seconds=200.0, year=None, isrc=None,
-        musicbrainz_track_id=None, musicbrainz_recording_id=None, fingerprint="/c.mp3",
+        id="/c.mp3",
+        path="/c.mp3",
+        filename="/c.mp3",
+        raw=raw,
+        artist="a",
+        album_artist=None,
+        title="t",
+        album=None,
+        version_qualifiers=[],
+        track_number=None,
+        disc_number=None,
+        duration_seconds=200.0,
+        year=None,
+        isrc=None,
+        musicbrainz_track_id=None,
+        musicbrainz_recording_id=None,
+        fingerprint="/c.mp3",
     )
     file_id = upsert_file(conn, "/c.mp3", 1.0, 1, "/c.mp3")
     upsert_local_track(conn, file_id, track)
@@ -83,8 +115,11 @@ def test_list_tracks_by_state_returns_matching_engine_reason_for_unavailable(tmp
 def test_list_tracks_by_state_error_message_holds_real_exception_text(tmp_path):
     conn = get_connection(str(tmp_path / "t.db"))
     _seed(
-        conn, "/a.mp3", AvailabilityState.ERROR,
-        reason="provider_error", error_message="ConnectionError: timed out after 5s",
+        conn,
+        "/a.mp3",
+        AvailabilityState.ERROR,
+        reason="provider_error",
+        error_message="ConnectionError: timed out after 5s",
     )
     rows = list_tracks_by_state(conn, "ERROR")
     assert rows[0]["error_message"] == "ConnectionError: timed out after 5s"
