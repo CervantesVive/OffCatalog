@@ -5,7 +5,14 @@ from pathlib import Path
 import typer
 
 from offcatalog.db.connection import get_connection
-from offcatalog.db.repository import get_availability_state, record_check_result, upsert_file, upsert_local_track
+from offcatalog.db.repository import (
+    get_availability_state,
+    get_file_by_path,
+    record_check_result,
+    soft_delete_missing_files,
+    upsert_file,
+    upsert_local_track,
+)
 from offcatalog.matching.engine import match_track
 from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
@@ -41,14 +48,23 @@ def scan(
 ) -> None:
     conn = get_connection(db)
     added = 0
+    skipped = 0
     errors = 0
+    seen_paths: set[str] = set()
     for root, _dirs, filenames in os.walk(path):
         for filename in filenames:
             if not filename.lower().endswith(".mp3"):
                 continue
             file_path = str(Path(root) / filename)
+            seen_paths.add(file_path)
             try:
                 stat = os.stat(file_path)
+
+                existing = get_file_by_path(conn, file_path)
+                if existing and existing["mtime"] == stat.st_mtime and existing["size"] == stat.st_size:
+                    skipped += 1
+                    continue
+
                 track = extract_local_track(file_path)
                 file_id = upsert_file(conn, file_path, stat.st_mtime, stat.st_size, track.fingerprint)
                 upsert_local_track(conn, file_id, track)
@@ -57,7 +73,10 @@ def scan(
                 typer.echo(f"Skipping {file_path}: {exc}", err=True)
                 continue
             added += 1
-    typer.echo(f"Scanned {added} track(s), {errors} error(s) -> {db}")
+    deleted = soft_delete_missing_files(conn, seen_paths)
+    typer.echo(
+        f"Scanned: {added} added/changed, {skipped} unchanged, {deleted} deleted, {errors} error(s) -> {db}"
+    )
     conn.close()
 
 

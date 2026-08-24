@@ -70,6 +70,21 @@ def upsert_local_track(conn: sqlite3.Connection, file_id: str, track: LocalTrack
     conn.commit()
 
 
+def get_file_by_path(conn: sqlite3.Connection, path: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM files WHERE path = ?", (path,)).fetchone()
+
+
+def soft_delete_missing_files(conn: sqlite3.Connection, seen_paths: set[str]) -> int:
+    rows = conn.execute("SELECT id, path FROM files WHERE deleted_at IS NULL").fetchall()
+    deleted = 0
+    for row in rows:
+        if row["path"] not in seen_paths:
+            conn.execute("UPDATE files SET deleted_at = ? WHERE id = ?", (_now(), row["id"]))
+            deleted += 1
+    conn.commit()
+    return deleted
+
+
 def get_provider_id(conn: sqlite3.Connection, name: str) -> str:
     row = conn.execute("SELECT id FROM providers WHERE name = ?", (name,)).fetchone()
     if row:

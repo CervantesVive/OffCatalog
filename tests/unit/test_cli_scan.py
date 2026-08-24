@@ -53,3 +53,38 @@ def test_scan_skips_corrupt_file_and_continues(tmp_path):
     conn = get_connection(str(db_path))
     count = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()["c"]
     assert count == 1
+
+
+def test_scan_skips_unchanged_file_without_reextracting(tmp_path, monkeypatch):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    calls = []
+    import offcatalog.cli as cli_module
+    original = cli_module.extract_local_track
+    def spy(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(cli_module, "extract_local_track", spy)
+
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+    assert calls == []
+
+
+def test_scan_soft_deletes_missing_file(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    target = music_dir / "plain_version.mp3"
+    shutil.copy(FIXTURES / "plain_version.mp3", target)
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    target.unlink()
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    conn = get_connection(str(db_path))
+    row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
+    assert row["deleted_at"] is not None
