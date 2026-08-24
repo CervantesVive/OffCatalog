@@ -95,7 +95,68 @@ def get_provider_id(conn: sqlite3.Connection, name: str) -> str:
     return provider_id
 
 
+def list_ambiguous_tracks(conn: sqlite3.Connection, provider_name: str) -> list[sqlite3.Row]:
+    provider_id = get_provider_id(conn, provider_name)
+    return conn.execute(
+        """
+        SELECT lt.* FROM local_tracks lt
+        JOIN availability_results ar ON ar.local_track_id = lt.id
+        WHERE ar.provider_id = ? AND ar.state = 'AMBIGUOUS'
+        """,
+        (provider_id,),
+    ).fetchall()
+
+
+def list_candidates_for_track(conn: sqlite3.Connection, local_track_id: str, provider_name: str) -> list[sqlite3.Row]:
+    provider_id = get_provider_id(conn, provider_name)
+    return conn.execute(
+        "SELECT * FROM provider_candidates WHERE local_track_id = ? AND provider_id = ? ORDER BY checked_at DESC",
+        (local_track_id, provider_id),
+    ).fetchall()
+
+
+def has_manual_decision(conn: sqlite3.Connection, local_track_id: str, provider_name: str) -> bool:
+    provider_id = get_provider_id(conn, provider_name)
+    row = conn.execute(
+        """
+        SELECT 1 FROM manual_match_decisions mmd
+        JOIN provider_candidates pc ON pc.id = mmd.provider_candidate_id
+        WHERE mmd.local_track_id = ? AND pc.provider_id = ?
+        LIMIT 1
+        """,
+        (local_track_id, provider_id),
+    ).fetchone()
+    return row is not None
+
+
+def record_manual_decision(conn: sqlite3.Connection, local_track_id: str, provider_candidate_id: str, decision: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO manual_match_decisions (local_track_id, provider_candidate_id, decision, decided_at)
+        VALUES (?,?,?,?)
+        ON CONFLICT(local_track_id, provider_candidate_id) DO UPDATE SET
+            decision=excluded.decision, decided_at=excluded.decided_at
+        """,
+        (local_track_id, provider_candidate_id, decision, _now()),
+    )
+    if decision == "same_recording":
+        candidate_row = conn.execute(
+            "SELECT provider_id FROM provider_candidates WHERE id = ?", (provider_candidate_id,)
+        ).fetchone()
+        conn.execute(
+            """
+            UPDATE availability_results SET state='AVAILABLE', best_candidate_id=?, checked_at=?
+            WHERE local_track_id=? AND provider_id=?
+            """,
+            (provider_candidate_id, _now(), local_track_id, candidate_row["provider_id"]),
+        )
+    conn.commit()
+
+
 def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_name: str, result: MatchResult) -> None:
+    if has_manual_decision(conn, local_track_id, provider_name):
+        return
+
     provider_id = get_provider_id(conn, provider_name)
     best_candidate_id = None
 
@@ -115,6 +176,22 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
                 result.candidate["duration_seconds"], result.score, result.reason, _now(),
             ),
         )
+    else:
+        for candidate in result.all_candidates:
+            conn.execute(
+                """
+                INSERT INTO provider_candidates (
+                    id, local_track_id, provider_id, provider_track_id, provider_artist,
+                    provider_title, provider_album, provider_duration, match_score, match_reason, checked_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(uuid.uuid4()), local_track_id, provider_id,
+                    candidate["provider_track_id"], candidate["artist"],
+                    candidate["title"], candidate.get("album"),
+                    candidate["duration_seconds"], result.score, result.reason, _now(),
+                ),
+            )
 
     conn.execute(
         """

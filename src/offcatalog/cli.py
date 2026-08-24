@@ -8,7 +8,10 @@ from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
     get_availability_state,
     get_file_by_path,
+    list_ambiguous_tracks,
+    list_candidates_for_track,
     record_check_result,
+    record_manual_decision,
     soft_delete_missing_files,
     upsert_file,
     upsert_local_track,
@@ -116,6 +119,32 @@ def check(
         checked += 1
 
     typer.echo(f"Checked {checked} track(s)")
+    conn.close()
+
+
+@app.command()
+def review(
+    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    provider_name: str = typer.Option("deezer", "--provider", help="Provider whose ambiguous matches to review"),
+) -> None:
+    conn = get_connection(db)
+    tracks = list_ambiguous_tracks(conn, provider_name)
+
+    for track_row in tracks:
+        typer.echo(f"\nLocal:  {track_row['artist']} - {track_row['title']} ({track_row['duration_seconds']}s)")
+        candidates = list_candidates_for_track(conn, track_row["id"], provider_name)
+        for i, candidate in enumerate(candidates):
+            typer.echo(
+                f"  [{i}] {candidate['provider_artist']} - {candidate['provider_title']} "
+                f"({candidate['provider_duration']}s) score={candidate['match_score']:.2f}"
+            )
+
+        choice = typer.prompt("[s]ame / [d]ifferent / [k]ip", default="k")
+        if choice == "s" and candidates:
+            record_manual_decision(conn, track_row["id"], candidates[0]["id"], "same_recording")
+        elif choice == "d" and candidates:
+            record_manual_decision(conn, track_row["id"], candidates[0]["id"], "different_recording")
+
     conn.close()
 
 
