@@ -1,0 +1,11 @@
+services:
+  offcatalog:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ${MUSIC_DIR:-/music}:/music:ro
+      - ${OFFCATALOG_STATE_DIR:-./state}:/state:rw
+    environment:
+      - OFFCATALOG_DB=/state/offcatalog.db
+    working_dir: /state
