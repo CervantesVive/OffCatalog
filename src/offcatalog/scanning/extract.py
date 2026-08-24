@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import uuid
 
 from mutagen.easyid3 import EasyID3
@@ -20,6 +21,16 @@ def _to_int(value: str | None) -> int | None:
         return None
     digits = "".join(ch for ch in value.split("/")[0] if ch.isdigit())
     return int(digits) if digits else None
+
+
+_YEAR_RE = re.compile(r"^\d{4}")
+
+
+def _parse_year(value: str | None) -> int | None:
+    if not value:
+        return None
+    match = _YEAR_RE.match(value)
+    return int(match.group()) if match else None
 
 
 def extract_local_track(path: str) -> LocalTrack:
@@ -57,7 +68,7 @@ def extract_local_track(path: str) -> LocalTrack:
         track_number=_to_int(raw.track_number),
         disc_number=_to_int(raw.disc_number),
         duration_seconds=duration_seconds,
-        year=_to_int(raw.year),
+        year=_parse_year(raw.year),
         isrc=raw.isrc,
         musicbrainz_track_id=raw.musicbrainz_track_id,
         musicbrainz_recording_id=raw.musicbrainz_recording_id,
