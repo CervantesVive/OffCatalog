@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from offcatalog.matching.types import AvailabilityState, MatchResult
 from offcatalog.models import LocalTrack
+from offcatalog.normalize import extract_qualifiers, normalize_text
 from offcatalog.providers.base import ProviderError, StreamingProvider
 
 
@@ -34,6 +35,11 @@ def match_track(
     )
 
 
+def _qualifiers_compatible(local_qualifiers: list[str], candidate_title: str) -> bool:
+    candidate_qualifiers = set(extract_qualifiers(candidate_title).qualifiers)
+    return set(local_qualifiers) == candidate_qualifiers
+
+
 def _match_by_metadata(
     track: LocalTrack,
     candidates: list,
@@ -46,7 +52,19 @@ def _match_by_metadata(
             state=AvailabilityState.UNAVAILABLE, score=0.0, reason="no_candidates",
             candidate=None, all_candidates=[],
         )
+
+    for candidate in candidates:
+        artist_match = normalize_text(candidate["artist"]) == track.artist
+        duration_ok = abs(candidate["duration_seconds"] - track.duration_seconds) <= duration_tolerance_seconds
+        qualifiers_ok = _qualifiers_compatible(track.version_qualifiers, candidate["title"])
+
+        if artist_match and duration_ok and qualifiers_ok:
+            return MatchResult(
+                state=AvailabilityState.AVAILABLE, score=1.0, reason="meta_duration",
+                candidate=candidate, all_candidates=candidates,
+            )
+
     return MatchResult(
-        state=AvailabilityState.UNAVAILABLE, score=0.0, reason="no_candidates",
+        state=AvailabilityState.UNAVAILABLE, score=0.0, reason="no_confident_candidate",
         candidate=None, all_candidates=candidates,
     )

@@ -57,3 +57,40 @@ def test_no_isrc_on_track_skips_level_1():
     provider = FakeProvider(search_result=[])
     result = match_track(make_track(isrc=None), provider)
     assert result.reason != "isrc_exact"
+
+
+def test_metadata_and_duration_match_is_available():
+    candidate = {"provider_track_id": "1", "artist": "Depeche Mode", "title": "Enjoy the Silence",
+                 "album": "Violator", "duration_seconds": 259.0, "isrc": None}
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(make_track(isrc=None), provider)
+    assert result.state == AvailabilityState.AVAILABLE
+    assert result.reason == "meta_duration"
+
+
+def test_duration_outside_tolerance_is_rejected_not_ambiguous_yet():
+    # duration way off (7:18 local vs 4:15 candidate) -> Depeche Mode Hands and Feet Mix case
+    candidate = {"provider_track_id": "1", "artist": "Depeche Mode", "title": "Enjoy the Silence",
+                 "album": "Violator", "duration_seconds": 255.0, "isrc": None}
+    local = make_track(isrc=None, duration_seconds=438.0, version_qualifiers=["hands and feet mix"])
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(local, provider)
+    assert result.state != AvailabilityState.AVAILABLE
+
+
+def test_qualifier_mismatch_is_rejected_not_available():
+    candidate = {"provider_track_id": "1", "artist": "Depeche Mode", "title": "Enjoy the Silence",
+                 "album": "Violator", "duration_seconds": 258.0, "isrc": None}
+    local = make_track(isrc=None, duration_seconds=258.0, version_qualifiers=["live"])
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(local, provider)
+    assert result.state != AvailabilityState.AVAILABLE
+
+
+def test_remaster_qualifier_is_compatible_with_plain():
+    candidate = {"provider_track_id": "1", "artist": "Depeche Mode", "title": "Enjoy the Silence",
+                 "album": "Violator", "duration_seconds": 258.0, "isrc": None}
+    local = make_track(isrc=None, duration_seconds=258.0, version_qualifiers=[])
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(local, provider)
+    assert result.state == AvailabilityState.AVAILABLE
