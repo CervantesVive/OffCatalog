@@ -69,3 +69,30 @@ def test_network_failure_raises_provider_error():
     provider = DeezerProvider(client=_client_with(handler))
     with pytest.raises(ProviderError):
         provider.search_track(make_track())
+
+
+def test_search_by_isrc_raises_on_non_not_found_api_error():
+    def handler(request):
+        return httpx.Response(200, json={"error": {"type": "QuotaException", "message": "rate limited"}})
+
+    provider = DeezerProvider(client=_client_with(handler))
+    with pytest.raises(ProviderError):
+        provider.search_by_isrc("GBAYE9000212")
+
+
+def test_search_track_raises_on_non_not_found_api_error():
+    def handler(request):
+        return httpx.Response(200, json={"error": {"type": "QuotaException", "message": "rate limited"}})
+
+    provider = DeezerProvider(client=_client_with(handler))
+    with pytest.raises(ProviderError):
+        provider.search_track(make_track())
+
+
+def test_malformed_json_raises_provider_error():
+    def handler(request):
+        return httpx.Response(200, text="not json")
+
+    provider = DeezerProvider(client=_client_with(handler))
+    with pytest.raises(ProviderError):
+        provider.search_by_isrc("GBAYE9000212")
