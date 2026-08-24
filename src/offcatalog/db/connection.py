@@ -22,7 +22,19 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     )
     applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations")}
 
-    for migration_file in sorted(_MIGRATIONS_DIR.glob("*.sql")):
+    # Validate for duplicate version numbers before executing any DDL
+    migration_files = sorted(_MIGRATIONS_DIR.glob("*.sql"))
+    seen_versions: dict[int, Path] = {}
+    for migration_file in migration_files:
+        version = int(migration_file.name.split("_", 1)[0])
+        if version in seen_versions:
+            raise ValueError(
+                f"Duplicate migration version {version}: "
+                f"{seen_versions[version].name} and {migration_file.name}"
+            )
+        seen_versions[version] = migration_file
+
+    for migration_file in migration_files:
         version = int(migration_file.name.split("_", 1)[0])
         if version in applied:
             continue
