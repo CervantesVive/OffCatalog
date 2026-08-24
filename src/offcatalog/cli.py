@@ -203,6 +203,17 @@ def review(
         "deezer", "--provider", help="Provider whose ambiguous matches to review"
     ),
 ) -> None:
+    # Same guard as check(): an unknown name would otherwise be lazily INSERTed
+    # into `providers` via list_ambiguous_tracks -> get_provider_id, permanently
+    # inflating the provider count that list_unavailable_everywhere requires
+    # every track to satisfy — silently emptying every future playlist.
+    if provider_name not in PROVIDER_REGISTRY:
+        known = ", ".join(sorted(PROVIDER_REGISTRY))
+        typer.echo(
+            f"Unknown provider {provider_name!r}. Known providers: {known}", err=True
+        )
+        raise typer.Exit(code=1)
+
     conn = get_connection(db)
     tracks = list_ambiguous_tracks(conn, provider_name)
 

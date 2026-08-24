@@ -188,3 +188,18 @@ def test_unavailable_result_does_not_persist_candidates(tmp_path):
         "c"
     ]
     assert count == 0
+
+
+def test_review_rejects_unknown_provider_and_creates_no_provider_row(tmp_path):
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    _seed_ambiguous_track(conn)
+    conn.close()
+
+    result = runner.invoke(app, ["review", "--db", str(db_path), "--provider", "bogus"])
+
+    assert result.exit_code != 0
+    assert "bogus" in result.output
+    conn = get_connection(str(db_path))
+    rows = conn.execute("SELECT name FROM providers WHERE name = 'bogus'").fetchall()
+    assert rows == []
