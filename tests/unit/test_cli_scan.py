@@ -38,3 +38,18 @@ def test_scan_is_idempotent(tmp_path):
     conn = get_connection(str(db_path))
     count = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()["c"]
     assert count == 1
+
+
+def test_scan_skips_corrupt_file_and_continues(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    shutil.copy(FIXTURES / "plain_version.mp3", music_dir / "plain_version.mp3")
+    (music_dir / "bad.mp3").write_bytes(b"not an mp3")
+    db_path = tmp_path / "catalog.db"
+
+    result = runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    conn = get_connection(str(db_path))
+    count = conn.execute("SELECT COUNT(*) AS c FROM local_tracks").fetchone()["c"]
+    assert count == 1

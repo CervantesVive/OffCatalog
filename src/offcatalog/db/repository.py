@@ -34,6 +34,15 @@ def upsert_file(conn: sqlite3.Connection, path: str, mtime: float, size: int, fi
 
 
 def upsert_local_track(conn: sqlite3.Connection, file_id: str, track: LocalTrack) -> None:
+    # A file has at most one local_tracks row. extract_local_track() assigns a fresh
+    # random id on every call, so reuse the existing row's id (if any) for this file_id
+    # rather than track.id, otherwise every re-scan of an unchanged file would insert a
+    # duplicate row instead of updating in place.
+    existing = conn.execute(
+        "SELECT id FROM local_tracks WHERE file_id = ?", (file_id,)
+    ).fetchone()
+    track_id = existing["id"] if existing else track.id
+
     conn.execute(
         """
         INSERT INTO local_tracks (
@@ -51,12 +60,13 @@ def upsert_local_track(conn: sqlite3.Connection, file_id: str, track: LocalTrack
             raw_tags_json=excluded.raw_tags_json
         """,
         (
-            track.id, file_id, track.artist, track.album_artist, track.title, track.album,
+            track_id, file_id, track.artist, track.album_artist, track.title, track.album,
             json.dumps(track.version_qualifiers), track.track_number, track.disc_number,
             track.duration_seconds, track.year, track.isrc, track.musicbrainz_track_id,
             track.musicbrainz_recording_id, json.dumps(asdict(track.raw)),
         ),
     )
+    conn.commit()
     conn.commit()
 
 

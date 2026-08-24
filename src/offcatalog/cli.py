@@ -22,22 +22,23 @@ def scan(
 ) -> None:
     conn = get_connection(db)
     added = 0
+    errors = 0
     for root, _dirs, filenames in os.walk(path):
         for filename in filenames:
             if not filename.lower().endswith(".mp3"):
                 continue
             file_path = str(Path(root) / filename)
-            stat = os.stat(file_path)
-            track = extract_local_track(file_path)
-            file_id = upsert_file(conn, file_path, stat.st_mtime, stat.st_size, track.fingerprint)
-            existing = conn.execute(
-                "SELECT id FROM local_tracks WHERE file_id = ?", (file_id,)
-            ).fetchone()
-            if existing:
-                track.id = existing["id"]
-            upsert_local_track(conn, file_id, track)
+            try:
+                stat = os.stat(file_path)
+                track = extract_local_track(file_path)
+                file_id = upsert_file(conn, file_path, stat.st_mtime, stat.st_size, track.fingerprint)
+                upsert_local_track(conn, file_id, track)
+            except Exception as exc:
+                errors += 1
+                typer.echo(f"Skipping {file_path}: {exc}", err=True)
+                continue
             added += 1
-    typer.echo(f"Scanned {added} track(s) into {db}")
+    typer.echo(f"Scanned {added} track(s), {errors} error(s) -> {db}")
     conn.close()
 
 

@@ -66,3 +66,15 @@ def test_unchecked_track_reports_not_checked(tmp_path):
     conn = get_connection(str(tmp_path / "t.db"))
     get_provider_id(conn, "deezer")
     assert get_availability_state(conn, "nonexistent", "deezer") == "NOT_CHECKED"
+
+
+def test_upsert_local_track_is_idempotent_on_file_id(tmp_path):
+    conn = get_connection(str(tmp_path / "t.db"))
+    file_id = upsert_file(conn, "/x.mp3", mtime=1.0, size=1, fingerprint="fp1")
+
+    upsert_local_track(conn, file_id, make_track(id="t1", title="enjoy the silence"))
+    upsert_local_track(conn, file_id, make_track(id="t2", title="enjoy the silence (remix)"))
+
+    rows = conn.execute("SELECT * FROM local_tracks WHERE file_id = ?", (file_id,)).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["title"] == "enjoy the silence (remix)"
