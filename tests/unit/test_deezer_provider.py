@@ -96,3 +96,27 @@ def test_malformed_json_raises_provider_error():
     provider = DeezerProvider(client=_client_with(handler))
     with pytest.raises(ProviderError):
         provider.search_by_isrc("GBAYE9000212")
+
+
+class _FakeRateLimiter:
+    def __init__(self):
+        self.calls = 0
+
+    def wait(self):
+        self.calls += 1
+
+
+def test_rate_limiter_wait_called_once_per_http_request():
+    def handler(request):
+        if "isrc" in request.url.path:
+            return httpx.Response(200, json={"error": {"type": "DataException"}})
+        return httpx.Response(200, json={"data": []})
+
+    limiter = _FakeRateLimiter()
+    provider = DeezerProvider(client=_client_with(handler), rate_limiter=limiter)
+
+    provider.search_by_isrc("ZZZZZZZZZZZZ")
+    assert limiter.calls == 1
+
+    provider.search_track(make_track())
+    assert limiter.calls == 2

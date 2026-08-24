@@ -6,6 +6,8 @@ from collections import deque
 
 class TokenBucket:
     def __init__(self, rate: int, per_seconds: float) -> None:
+        if rate <= 0:
+            raise ValueError("rate must be positive")
         self._rate = rate
         self._per_seconds = per_seconds
         self._calls: deque[float] = deque()

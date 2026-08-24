@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from offcatalog.ratelimit import TokenBucket
 
 
@@ -19,3 +21,8 @@ def test_token_bucket_throttles_beyond_rate():
         bucket.wait()
     elapsed = time.monotonic() - start
     assert elapsed >= 0.3
+
+
+def test_token_bucket_rejects_nonpositive_rate():
+    with pytest.raises(ValueError):
+        TokenBucket(rate=0, per_seconds=1.0)

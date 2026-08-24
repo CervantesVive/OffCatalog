@@ -94,7 +94,8 @@ def check(
     retry_errors: bool = typer.Option(False, "--retry-errors", help="Re-check tracks currently in ERROR state"),
 ) -> None:
     conn = get_connection(db)
-    provider = DeezerProvider()
+    rate_limiter = TokenBucket(rate=45, per_seconds=5.0)
+    provider = DeezerProvider(rate_limiter=rate_limiter)
     rows = conn.execute("SELECT * FROM local_tracks").fetchall()
 
     needs_check_states = {AvailabilityState.NOT_CHECKED.value}
@@ -102,7 +103,6 @@ def check(
         needs_check_states.add(AvailabilityState.ERROR.value)
 
     checked = 0
-    rate_limiter = TokenBucket(rate=45, per_seconds=5.0)
     for row in rows:
         if limit is not None and checked >= limit:
             break
@@ -110,7 +110,6 @@ def check(
         if current_state not in needs_check_states:
             continue
         track = _row_to_track(row)
-        rate_limiter.wait()
         result = match_track(track, provider)
         record_check_result(conn, track.id, provider_name, result)
         typer.echo(f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})")

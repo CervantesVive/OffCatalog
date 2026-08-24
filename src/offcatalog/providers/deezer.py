@@ -15,8 +15,9 @@ class DeezerProvider:
     name = "deezer"
     BASE_URL = "https://api.deezer.com"
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(self, client: httpx.Client | None = None, rate_limiter=None) -> None:
         self._client = client or httpx.Client(base_url=self.BASE_URL, timeout=10.0)
+        self._rate_limiter = rate_limiter
 
     def search_by_isrc(self, isrc: str) -> ProviderCandidate | None:
         data = self._get(f"/track/isrc:{isrc}")
@@ -40,6 +41,8 @@ class DeezerProvider:
             raise ProviderError(f"Deezer API error: {error}")
 
     def _get(self, path: str, **kwargs) -> dict:
+        if self._rate_limiter is not None:
+            self._rate_limiter.wait()
         try:
             response = self._client.get(path, **kwargs)
             response.raise_for_status()
