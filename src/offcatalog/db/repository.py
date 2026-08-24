@@ -231,6 +231,8 @@ def get_file_path_for_track(conn: sqlite3.Connection, local_track_id: str) -> st
         "SELECT f.path FROM files f JOIN local_tracks lt ON lt.file_id = f.id WHERE lt.id = ?",
         (local_track_id,),
     ).fetchone()
+    if row is None:
+        raise ValueError(f"No file found for local_track_id={local_track_id!r}")
     return row["path"]
 
 
