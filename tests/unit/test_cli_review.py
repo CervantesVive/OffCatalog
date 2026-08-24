@@ -4,6 +4,7 @@ from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
     get_provider_id,
     list_ambiguous_tracks,
+    list_candidates_for_track,
     record_check_result,
     record_manual_decision,
     upsert_file,
@@ -18,7 +19,7 @@ from offcatalog.cli import app
 runner = CliRunner()
 
 
-def _seed_ambiguous_track(conn):
+def _seed_track(conn):
     raw = RawTags("Artist", "Title (Remix)", "Album", None, None, None, None, None, None, None)
     track = LocalTrack(
         id="t1", path="/x.mp3", filename="x.mp3", raw=raw,
@@ -29,6 +30,11 @@ def _seed_ambiguous_track(conn):
     )
     file_id = upsert_file(conn, "/x.mp3", 1.0, 1, "fp")
     upsert_local_track(conn, file_id, track)
+    return track
+
+
+def _seed_ambiguous_track(conn):
+    track = _seed_track(conn)
     candidate = {"provider_track_id": "1", "artist": "Artist", "title": "Title (Remix)",
                  "album": "Album", "duration_seconds": 400.0, "isrc": None}
     result = MatchResult(state=AvailabilityState.AMBIGUOUS, score=0.7, reason="fuzzy_candidate",
@@ -79,3 +85,40 @@ def test_review_decision_persists_across_rescan(tmp_path):
 
     state = conn.execute("SELECT state FROM availability_results").fetchone()["state"]
     assert state == "AVAILABLE"  # manual decision must not be overwritten
+
+
+def test_review_picks_specified_candidate_not_default(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = get_connection(db_path)
+    track = _seed_track(conn)
+    candidate_a = {"provider_track_id": "1", "artist": "Artist", "title": "Title (Remix)",
+                   "album": "Album", "duration_seconds": 400.0, "isrc": None}
+    candidate_b = {"provider_track_id": "2", "artist": "Artist", "title": "Title (Live)",
+                   "album": "Album", "duration_seconds": 405.0, "isrc": None}
+    result = MatchResult(state=AvailabilityState.AMBIGUOUS, score=0.7, reason="fuzzy_candidate",
+                          candidate=None, all_candidates=[candidate_a, candidate_b])
+    record_check_result(conn, track.id, "deezer", result)
+    candidates = list_candidates_for_track(conn, track.id, "deezer")
+    assert len(candidates) == 2
+    conn.close()
+
+    with patch("typer.prompt", side_effect=["s", "1"]):
+        result = runner.invoke(app, ["review", "--db", db_path, "--provider", "deezer"])
+
+    assert result.exit_code == 0, result.output
+    conn = get_connection(db_path)
+    row = conn.execute("SELECT provider_candidate_id FROM manual_match_decisions").fetchone()
+    assert row["provider_candidate_id"] == candidates[1]["id"]
+
+
+def test_unavailable_result_does_not_persist_candidates(tmp_path):
+    conn = get_connection(str(tmp_path / "t.db"))
+    track = _seed_track(conn)
+    candidate = {"provider_track_id": "1", "artist": "Artist", "title": "Title (Remix)",
+                 "album": "Album", "duration_seconds": 400.0, "isrc": None}
+    result = MatchResult(state=AvailabilityState.UNAVAILABLE, score=0.3, reason="no_confident_candidate",
+                          candidate=None, all_candidates=[candidate])
+    record_check_result(conn, track.id, "deezer", result)
+
+    count = conn.execute("SELECT COUNT(*) AS c FROM provider_candidates").fetchone()["c"]
+    assert count == 0

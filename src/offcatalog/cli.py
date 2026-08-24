@@ -140,10 +140,13 @@ def review(
             )
 
         choice = typer.prompt("[s]ame / [d]ifferent / [k]ip", default="k")
-        if choice == "s" and candidates:
-            record_manual_decision(conn, track_row["id"], candidates[0]["id"], "same_recording")
-        elif choice == "d" and candidates:
-            record_manual_decision(conn, track_row["id"], candidates[0]["id"], "different_recording")
+        if choice in ("s", "d") and candidates:
+            if len(candidates) > 1:
+                index = int(typer.prompt(f"Which candidate? [0-{len(candidates) - 1}]", default="0"))
+            else:
+                index = 0
+            decision = "same_recording" if choice == "s" else "different_recording"
+            record_manual_decision(conn, track_row["id"], candidates[index]["id"], decision)
 
     conn.close()
 

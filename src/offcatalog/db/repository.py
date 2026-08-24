@@ -176,7 +176,7 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
                 result.candidate["duration_seconds"], result.score, result.reason, _now(),
             ),
         )
-    else:
+    elif result.state == AvailabilityState.AMBIGUOUS:
         for candidate in result.all_candidates:
             conn.execute(
                 """
