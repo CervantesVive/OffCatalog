@@ -243,3 +243,29 @@ def get_availability_state(conn: sqlite3.Connection, local_track_id: str, provid
         (local_track_id, provider_id),
     ).fetchone()
     return row["state"] if row else AvailabilityState.NOT_CHECKED.value
+
+
+def compute_state_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    # Scoped to the primary (first-registered) provider only. Multi-provider
+    # stats breakdown is future scope, not implemented here.
+    rows = conn.execute(
+        """
+        SELECT state, COUNT(*) AS c FROM availability_results
+        WHERE provider_id = (SELECT id FROM providers ORDER BY rowid LIMIT 1)
+        GROUP BY state
+        """
+    ).fetchall()
+    return {row["state"]: row["c"] for row in rows}
+
+
+def list_tracks_by_state(conn: sqlite3.Connection, state: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT lt.*, ar.error_message, ar.checked_at, f.path AS file_path
+        FROM local_tracks lt
+        JOIN availability_results ar ON ar.local_track_id = lt.id
+        JOIN files f ON f.id = lt.file_id
+        WHERE ar.state = ?
+        """,
+        (state,),
+    ).fetchall()

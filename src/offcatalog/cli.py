@@ -1,16 +1,19 @@
 import json
 import os
+from collections import Counter
 from pathlib import Path
 
 import typer
 
 from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
+    compute_state_counts,
     get_availability_state,
     get_file_by_path,
     get_file_path_for_track,
     list_ambiguous_tracks,
     list_candidates_for_track,
+    list_tracks_by_state,
     list_unavailable_everywhere,
     record_check_result,
     record_manual_decision,
@@ -23,6 +26,7 @@ from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
 from offcatalog.playlist import write_m3u8
 from offcatalog.providers.deezer import DeezerProvider
+from offcatalog.reports import write_csv_report
 from offcatalog.ratelimit import TokenBucket
 from offcatalog.scanning.extract import extract_local_track
 
@@ -169,6 +173,37 @@ def playlist(
     tracks = [{"path": get_file_path_for_track(conn, row["id"])} for row in rows]
     write_m3u8(tracks, output)
     typer.echo(f"Wrote {len(tracks)} track(s) to {output}")
+    conn.close()
+
+
+@app.command()
+def stats(db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database")) -> None:
+    conn = get_connection(db)
+    counts = compute_state_counts(conn)
+    total = sum(counts.values())
+    typer.echo(f"{total} local tracks")
+    for state in ["AVAILABLE", "UNAVAILABLE", "AMBIGUOUS", "NOT_CHECKED", "ERROR"]:
+        typer.echo(f"  {counts.get(state, 0)} {state.lower()}")
+
+    qualifier_counts: Counter[str] = Counter()
+    for row in conn.execute("SELECT version_qualifiers FROM local_tracks"):
+        qualifier_counts.update(json.loads(row["version_qualifiers"]))
+    if qualifier_counts:
+        typer.echo("\nCommon categories (heuristic, based on detected version qualifiers):")
+        for label, count in qualifier_counts.most_common(5):
+            typer.echo(f"  {label}: {count}")
+
+    for state, filename in [("UNAVAILABLE", "unavailable.csv"), ("AMBIGUOUS", "ambiguous.csv"), ("ERROR", "errors.csv")]:
+        rows = [
+            {
+                "artist": r["artist"], "title": r["title"], "album": r["album"],
+                "duration": r["duration_seconds"], "path": r["file_path"],
+                "last_checked": r["checked_at"], "reason": r["error_message"] or "",
+            }
+            for r in list_tracks_by_state(conn, state)
+        ]
+        write_csv_report(rows, f"reports/{filename}")
+
     conn.close()
 
 
