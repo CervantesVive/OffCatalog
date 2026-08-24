@@ -290,7 +290,10 @@ def stats(
         typer.echo(f"  {counts.get(state, 0)} {state.lower()}")
 
     qualifier_counts: Counter[str] = Counter()
-    for row in conn.execute("SELECT version_qualifiers FROM local_tracks"):
+    for row in conn.execute(
+        "SELECT lt.version_qualifiers FROM local_tracks lt "
+        "JOIN files f ON f.id = lt.file_id WHERE f.deleted_at IS NULL"
+    ):
         qualifier_counts.update(json.loads(row["version_qualifiers"]))
     if qualifier_counts:
         typer.echo(

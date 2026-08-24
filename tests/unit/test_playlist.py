@@ -174,6 +174,54 @@ def test_soft_deleted_file_is_excluded_from_playlist_and_stats(tmp_path):
     assert counts.get("NOT_CHECKED", 0) == 0
 
 
+def test_stats_qualifier_histogram_excludes_soft_deleted_files(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = get_connection(db_path)
+
+    def _seed_with_qualifiers(path, qualifiers, state):
+        raw = RawTags("A", "T", None, None, None, None, None, None, None, None)
+        track = LocalTrack(
+            id=path,
+            path=path,
+            filename=path,
+            raw=raw,
+            artist="a",
+            album_artist=None,
+            title="t",
+            album=None,
+            version_qualifiers=qualifiers,
+            track_number=None,
+            disc_number=None,
+            duration_seconds=200.0,
+            year=None,
+            isrc=None,
+            musicbrainz_track_id=None,
+            musicbrainz_recording_id=None,
+            fingerprint=path,
+        )
+        file_id = upsert_file(conn, path, 1.0, 1, path)
+        upsert_local_track(conn, file_id, track)
+        record_check_result(
+            conn,
+            track.id,
+            "deezer",
+            MatchResult(
+                state=state, score=0.0, reason="t", candidate=None, all_candidates=[]
+            ),
+        )
+
+    _seed_with_qualifiers("/kept.mp3", ["live"], AvailabilityState.UNAVAILABLE)
+    _seed_with_qualifiers("/unmounted.mp3", ["demo"], AvailabilityState.UNAVAILABLE)
+    soft_delete_missing_files(conn, {"/kept.mp3"})
+    conn.close()
+
+    result = runner.invoke(app, ["stats", "--db", db_path])
+
+    assert result.exit_code == 0, result.output
+    assert "live" in result.output
+    assert "demo" not in result.output
+
+
 def test_write_m3u8_produces_valid_playlist(tmp_path):
     output = tmp_path / "out.m3u8"
     write_m3u8([{"path": "/music/a.mp3"}, {"path": "/music/b.mp3"}], str(output))
