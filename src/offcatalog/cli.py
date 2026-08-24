@@ -1,13 +1,32 @@
+import json
 import os
 from pathlib import Path
 
 import typer
 
 from offcatalog.db.connection import get_connection
-from offcatalog.db.repository import upsert_file, upsert_local_track
+from offcatalog.db.repository import get_availability_state, record_check_result, upsert_file, upsert_local_track
+from offcatalog.matching.engine import match_track
+from offcatalog.matching.types import AvailabilityState
+from offcatalog.models import LocalTrack, RawTags
+from offcatalog.providers.deezer import DeezerProvider
 from offcatalog.scanning.extract import extract_local_track
 
 app = typer.Typer(help="Scan an MP3 collection and find tracks not on streaming.")
+
+
+def _row_to_track(row) -> LocalTrack:
+    raw = json.loads(row["raw_tags_json"])
+    return LocalTrack(
+        id=row["id"], path="", filename="", raw=RawTags(**raw),
+        artist=row["artist"], album_artist=row["album_artist"], title=row["title"],
+        album=row["album"], version_qualifiers=json.loads(row["version_qualifiers"]),
+        track_number=row["track_number"], disc_number=row["disc_number"],
+        duration_seconds=row["duration_seconds"], year=row["year"], isrc=row["isrc"],
+        musicbrainz_track_id=row["musicbrainz_track_id"],
+        musicbrainz_recording_id=row["musicbrainz_recording_id"],
+        fingerprint="",
+    )
 
 
 @app.callback()
@@ -39,6 +58,31 @@ def scan(
                 continue
             added += 1
     typer.echo(f"Scanned {added} track(s), {errors} error(s) -> {db}")
+    conn.close()
+
+
+@app.command()
+def check(
+    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    limit: int | None = typer.Option(None, "--limit", help="Max tracks to check this run"),
+) -> None:
+    conn = get_connection(db)
+    provider = DeezerProvider()
+    rows = conn.execute("SELECT * FROM local_tracks").fetchall()
+
+    checked = 0
+    for row in rows:
+        if limit is not None and checked >= limit:
+            break
+        if get_availability_state(conn, row["id"], provider.name) != AvailabilityState.NOT_CHECKED.value:
+            continue
+        track = _row_to_track(row)
+        result = match_track(track, provider)
+        record_check_result(conn, track.id, provider.name, result)
+        typer.echo(f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})")
+        checked += 1
+
+    typer.echo(f"Checked {checked} track(s)")
     conn.close()
 
 
