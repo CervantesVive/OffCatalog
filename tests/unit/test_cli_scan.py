@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 
@@ -88,3 +89,31 @@ def test_scan_soft_deletes_missing_file(tmp_path):
     conn = get_connection(str(db_path))
     row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
     assert row["deleted_at"] is not None
+
+
+def test_scan_undeletes_file_that_reappears_unchanged(tmp_path):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    target = music_dir / "plain_version.mp3"
+    shutil.copy(FIXTURES / "plain_version.mp3", target)
+    db_path = tmp_path / "catalog.db"
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    original_stat = target.stat()
+    original_bytes = target.read_bytes()
+    target.unlink()
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    conn = get_connection(str(db_path))
+    row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
+    assert row["deleted_at"] is not None
+
+    # Restore the same file with identical content, mtime, and size (e.g. a
+    # reconnected drive or an rsync/cp -p restore) -- stat alone matches "unchanged".
+    target.write_bytes(original_bytes)
+    os.utime(target, (original_stat.st_atime, original_stat.st_mtime))
+    runner.invoke(app, ["scan", str(music_dir), "--db", str(db_path)])
+
+    conn = get_connection(str(db_path))
+    row = conn.execute("SELECT deleted_at FROM files WHERE path = ?", (str(target),)).fetchone()
+    assert row["deleted_at"] is None

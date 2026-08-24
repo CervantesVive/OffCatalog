@@ -61,7 +61,12 @@ def scan(
                 stat = os.stat(file_path)
 
                 existing = get_file_by_path(conn, file_path)
-                if existing and existing["mtime"] == stat.st_mtime and existing["size"] == stat.st_size:
+                if (
+                    existing
+                    and existing["deleted_at"] is None
+                    and existing["mtime"] == stat.st_mtime
+                    and existing["size"] == stat.st_size
+                ):
                     skipped += 1
                     continue
 
