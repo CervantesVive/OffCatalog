@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from rapidfuzz import fuzz
+
 from offcatalog.matching.types import AvailabilityState, MatchResult
 from offcatalog.models import LocalTrack
 from offcatalog.normalize import extract_qualifiers, normalize_text
 from offcatalog.providers.base import ProviderError, StreamingProvider
+
+_AMBIGUOUS_FLOOR = 60.0
 
 
 def match_track(
@@ -64,7 +68,19 @@ def _match_by_metadata(
                 candidate=candidate, all_candidates=candidates,
             )
 
+    best_score = 0.0
+    for candidate in candidates:
+        text_a = f"{track.artist} {track.title}"
+        text_b = f"{normalize_text(candidate['artist'])} {normalize_text(candidate['title'])}"
+        best_score = max(best_score, fuzz.token_set_ratio(text_a, text_b))
+
+    if best_score >= _AMBIGUOUS_FLOOR:
+        return MatchResult(
+            state=AvailabilityState.AMBIGUOUS, score=best_score / 100.0, reason="fuzzy_candidate",
+            candidate=None, all_candidates=candidates,
+        )
+
     return MatchResult(
-        state=AvailabilityState.UNAVAILABLE, score=0.0, reason="no_confident_candidate",
+        state=AvailabilityState.UNAVAILABLE, score=best_score / 100.0, reason="no_confident_candidate",
         candidate=None, all_candidates=candidates,
     )

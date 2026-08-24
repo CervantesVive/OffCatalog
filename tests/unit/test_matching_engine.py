@@ -94,3 +94,23 @@ def test_remaster_qualifier_is_compatible_with_plain():
     provider = FakeProvider(isrc_result=None, search_result=[candidate])
     result = match_track(local, provider)
     assert result.state == AvailabilityState.AVAILABLE
+
+
+def test_close_fuzzy_match_with_no_duration_is_ambiguous_not_available():
+    candidate = {"provider_track_id": "1", "artist": "Depeche Mode", "title": "Enjoy the Silence (Remix)",
+                 "album": "Violator", "duration_seconds": 999.0, "isrc": None}
+    local = make_track(isrc=None, duration_seconds=258.0, version_qualifiers=[])
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(local, provider)
+    assert result.state == AvailabilityState.AMBIGUOUS
+    assert result.candidate is None
+    assert len(result.all_candidates) == 1
+
+
+def test_completely_unrelated_candidate_is_unavailable_not_ambiguous():
+    candidate = {"provider_track_id": "1", "artist": "Some Other Band", "title": "Totally Different Song",
+                 "album": "Nope", "duration_seconds": 120.0, "isrc": None}
+    local = make_track(isrc=None, duration_seconds=258.0, version_qualifiers=[])
+    provider = FakeProvider(isrc_result=None, search_result=[candidate])
+    result = match_track(local, provider)
+    assert result.state == AvailabilityState.UNAVAILABLE
