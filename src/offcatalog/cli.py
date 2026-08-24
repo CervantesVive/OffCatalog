@@ -89,20 +89,27 @@ def scan(
 def check(
     db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
     limit: int | None = typer.Option(None, "--limit", help="Max tracks to check this run"),
+    provider_name: str = typer.Option("deezer", "--provider", help="Provider to check against"),
+    retry_errors: bool = typer.Option(False, "--retry-errors", help="Re-check tracks currently in ERROR state"),
 ) -> None:
     conn = get_connection(db)
     provider = DeezerProvider()
     rows = conn.execute("SELECT * FROM local_tracks").fetchall()
 
+    needs_check_states = {AvailabilityState.NOT_CHECKED.value}
+    if retry_errors:
+        needs_check_states.add(AvailabilityState.ERROR.value)
+
     checked = 0
     for row in rows:
         if limit is not None and checked >= limit:
             break
-        if get_availability_state(conn, row["id"], provider.name) != AvailabilityState.NOT_CHECKED.value:
+        current_state = get_availability_state(conn, row["id"], provider_name)
+        if current_state not in needs_check_states:
             continue
         track = _row_to_track(row)
         result = match_track(track, provider)
-        record_check_result(conn, track.id, provider.name, result)
+        record_check_result(conn, track.id, provider_name, result)
         typer.echo(f"{row['artist']} - {row['title']}: {result.state.value} ({result.reason})")
         checked += 1
 
