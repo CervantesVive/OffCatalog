@@ -1,3 +1,5 @@
+import unicodedata
+
 from offcatalog.normalize import normalize_text
 
 
@@ -6,7 +8,10 @@ def test_normalize_casefolds():
 
 
 def test_normalize_unicode_nfkc():
-    assert normalize_text("Café") == normalize_text("Café")
+    composed = "Café"  # é as a single codepoint U+00E9
+    decomposed = unicodedata.normalize("NFD", composed)  # e + combining acute U+0301
+    assert composed != decomposed  # sanity: the two literals really do differ before normalization
+    assert normalize_text(composed) == normalize_text(decomposed)
 
 
 def test_normalize_unifies_featuring_variants():
