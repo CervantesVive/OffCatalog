@@ -8,8 +8,10 @@ from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
     get_availability_state,
     get_file_by_path,
+    get_file_path_for_track,
     list_ambiguous_tracks,
     list_candidates_for_track,
+    list_unavailable_everywhere,
     record_check_result,
     record_manual_decision,
     soft_delete_missing_files,
@@ -19,6 +21,7 @@ from offcatalog.db.repository import (
 from offcatalog.matching.engine import match_track
 from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
+from offcatalog.playlist import write_m3u8
 from offcatalog.providers.deezer import DeezerProvider
 from offcatalog.ratelimit import TokenBucket
 from offcatalog.scanning.extract import extract_local_track
@@ -148,6 +151,24 @@ def review(
             decision = "same_recording" if choice == "s" else "different_recording"
             record_manual_decision(conn, track_row["id"], candidates[index]["id"], decision)
 
+    conn.close()
+
+
+@app.command()
+def playlist(
+    db: str = typer.Option("offcatalog.db", "--db", help="Path to the SQLite database"),
+    state: str = typer.Option("unavailable_everywhere", "--state", help="unavailable_everywhere | ambiguous"),
+    output: str = typer.Option("playlists/not-on-streaming.m3u8", "--output", help="Output .m3u8 path"),
+) -> None:
+    conn = get_connection(db)
+    if state == "ambiguous":
+        rows = list_ambiguous_tracks(conn, "deezer")
+    else:
+        rows = list_unavailable_everywhere(conn)
+
+    tracks = [{"path": get_file_path_for_track(conn, row["id"])} for row in rows]
+    write_m3u8(tracks, output)
+    typer.echo(f"Wrote {len(tracks)} track(s) to {output}")
     conn.close()
 
 

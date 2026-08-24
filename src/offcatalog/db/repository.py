@@ -206,6 +206,34 @@ def record_check_result(conn: sqlite3.Connection, local_track_id: str, provider_
     conn.commit()
 
 
+def list_unavailable_everywhere(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    provider_count = conn.execute("SELECT COUNT(*) AS c FROM providers").fetchone()["c"]
+    if provider_count == 0:
+        return []
+    return conn.execute(
+        """
+        SELECT lt.* FROM local_tracks lt
+        WHERE (
+            SELECT COUNT(*) FROM availability_results ar
+            WHERE ar.local_track_id = lt.id AND ar.state IN ('UNAVAILABLE', 'AMBIGUOUS')
+        ) = ?
+        AND NOT EXISTS (
+            SELECT 1 FROM availability_results ar
+            WHERE ar.local_track_id = lt.id AND ar.state IN ('AVAILABLE', 'ERROR', 'NOT_CHECKED')
+        )
+        """,
+        (provider_count,),
+    ).fetchall()
+
+
+def get_file_path_for_track(conn: sqlite3.Connection, local_track_id: str) -> str:
+    row = conn.execute(
+        "SELECT f.path FROM files f JOIN local_tracks lt ON lt.file_id = f.id WHERE lt.id = ?",
+        (local_track_id,),
+    ).fetchone()
+    return row["path"]
+
+
 def get_availability_state(conn: sqlite3.Connection, local_track_id: str, provider_name: str) -> str:
     provider_id = get_provider_id(conn, provider_name)
     row = conn.execute(
