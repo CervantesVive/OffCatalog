@@ -39,9 +39,10 @@ variable.
 # Scan a music directory into the local database.
 uv run offcatalog scan /path/to/music
 
-# Enrich tracks lacking an embedded ISRC via MusicBrainz (optional, run
-# before check -- fills in ISRCs that feed check's exact-match path; never
-# marks a track available or unavailable itself).
+# Enrich every track via MusicBrainz (optional, run before check): fills in
+# ISRCs where missing, feeding check's exact-match path, and captures
+# disambiguation info (useful in review) even for tracks that already have
+# an ISRC. Never marks a track available or unavailable itself.
 uv run offcatalog enrich
 
 # Check unchecked tracks against Deezer (rate-limited automatically).
@@ -130,13 +131,16 @@ picks up where it left off (only unchecked tracks are selected).
 
 **Do I need to run `enrich` before `check`?**
 
-No — it's optional. `enrich` looks up MusicBrainz to fill in ISRCs for
-tracks whose files don't already have one embedded, which lets more tracks
-use `check`'s exact-match path instead of falling back to fuzzy matching.
-It never marks anything available or unavailable itself, and `review` will
-show its results (when present) as an extra hint next to each candidate.
-Skipping it just means `check` relies on embedded ISRCs and fuzzy matching
-alone, same as before this command existed.
+No — it's optional. `enrich` looks up MusicBrainz for *every* track, not
+just ones missing an ISRC: it fills in ISRCs for tracks whose files don't
+already have one embedded (letting more tracks use `check`'s exact-match
+path instead of falling back to fuzzy matching), and it also captures
+MusicBrainz disambiguation info even for tracks that already have an ISRC,
+since that's useful in `review`. It never marks anything available or
+unavailable itself, and `review` will show its results (when present) as an
+extra hint next to each candidate. Skipping it just means `check` relies on
+embedded ISRCs and fuzzy matching alone, same as before this command
+existed.
 
 **A track has a real B-side/alternate mix but shows AMBIGUOUS instead of
 UNAVAILABLE — why isn't it just marked unavailable?**
