@@ -3,6 +3,7 @@ import json
 from offcatalog.db.connection import get_connection
 from offcatalog.db.repository import (
     get_availability_state,
+    get_checked_fingerprint,
     get_musicbrainz_checked_fingerprint,
     get_provider_id,
     record_check_result,
@@ -163,6 +164,84 @@ def test_record_musicbrainz_enrichment_stores_not_found_result(tmp_path):
     ).fetchone()
     assert row["musicbrainz_isrc"] is None
     assert get_musicbrainz_checked_fingerprint(conn, track.id) == "fp1"
+
+
+def test_record_musicbrainz_enrichment_clears_stale_availability_results_on_isrc_change(
+    tmp_path,
+):
+    conn = get_connection(str(tmp_path / "t.db"))
+    file_id = upsert_file(conn, "/x.mp3", mtime=1.0, size=1, fingerprint="fp1")
+    track = make_track()
+    upsert_local_track(conn, file_id, track)
+
+    # Simulate `check` having already run: mocked Deezer returned nothing, so
+    # the track is UNAVAILABLE with a stored checked_fingerprint.
+    result = MatchResult(
+        state=AvailabilityState.UNAVAILABLE,
+        score=0.0,
+        reason="no_candidates",
+        candidate=None,
+        all_candidates=[],
+    )
+    record_check_result(conn, track.id, "deezer", result, checked_fingerprint="fp1")
+    assert get_checked_fingerprint(conn, track.id, "deezer") == "fp1"
+
+    # enrich discovers a new ISRC -- the file's own fingerprint hasn't
+    # changed, so without this, `check` would never reselect the track.
+    record_musicbrainz_enrichment(conn, track.id, "GBAYE9000212", None, "fp1")
+
+    assert get_checked_fingerprint(conn, track.id, "deezer") is None
+
+
+def test_record_musicbrainz_enrichment_leaves_availability_results_alone_when_isrc_unchanged(
+    tmp_path,
+):
+    conn = get_connection(str(tmp_path / "t.db"))
+    file_id = upsert_file(conn, "/x.mp3", mtime=1.0, size=1, fingerprint="fp1")
+    track = make_track()
+    upsert_local_track(conn, file_id, track)
+
+    record_musicbrainz_enrichment(conn, track.id, "GBAYE9000212", None, "fp1")
+
+    result = MatchResult(
+        state=AvailabilityState.UNAVAILABLE,
+        score=0.0,
+        reason="no_candidates",
+        candidate=None,
+        all_candidates=[],
+    )
+    record_check_result(conn, track.id, "deezer", result, checked_fingerprint="fp2")
+    assert get_checked_fingerprint(conn, track.id, "deezer") == "fp2"
+
+    # Re-running enrich with the *same* ISRC must not touch availability_results
+    # -- avoid needless recheck churn on repeat enrich runs.
+    record_musicbrainz_enrichment(conn, track.id, "GBAYE9000212", None, "fp2")
+
+    assert get_checked_fingerprint(conn, track.id, "deezer") == "fp2"
+
+
+def test_record_musicbrainz_enrichment_leaves_availability_results_alone_when_both_none(
+    tmp_path,
+):
+    conn = get_connection(str(tmp_path / "t.db"))
+    file_id = upsert_file(conn, "/x.mp3", mtime=1.0, size=1, fingerprint="fp1")
+    track = make_track()
+    upsert_local_track(conn, file_id, track)
+
+    result = MatchResult(
+        state=AvailabilityState.UNAVAILABLE,
+        score=0.0,
+        reason="no_candidates",
+        candidate=None,
+        all_candidates=[],
+    )
+    record_check_result(conn, track.id, "deezer", result, checked_fingerprint="fp1")
+
+    # "not found" enrichment result (isrc stays None) against a track that
+    # already had no MusicBrainz ISRC -- None -> None is not a change.
+    record_musicbrainz_enrichment(conn, track.id, None, None, "fp1")
+
+    assert get_checked_fingerprint(conn, track.id, "deezer") == "fp1"
 
 
 def test_record_check_result_persists_candidate_isrc(tmp_path):

@@ -316,11 +316,29 @@ def record_musicbrainz_enrichment(
     disambiguation: str | None,
     checked_fingerprint: str,
 ) -> None:
+    existing = conn.execute(
+        "SELECT musicbrainz_isrc FROM local_tracks WHERE id = ?",
+        (local_track_id,),
+    ).fetchone()
+    previous_isrc = existing["musicbrainz_isrc"] if existing else None
+
     conn.execute(
         "UPDATE local_tracks SET musicbrainz_isrc = ?, musicbrainz_disambiguation = ?, "
         "musicbrainz_checked_fingerprint = ? WHERE id = ?",
         (isrc, disambiguation, checked_fingerprint, local_track_id),
     )
+    if isrc != previous_isrc:
+        # The ISRC actually changed (NULL -> value, value -> a different value, or
+        # value -> NULL). `check`'s staleness check only looks at the file's own
+        # fingerprint, so without this a newly-discovered ISRC would never get
+        # picked up by a subsequent check run. Clear (not delete) every existing
+        # availability_results row for this track, across all providers, so
+        # `check` reselects it as stale on its next run.
+        conn.execute(
+            "UPDATE availability_results SET checked_fingerprint = NULL "
+            "WHERE local_track_id = ?",
+            (local_track_id,),
+        )
     conn.commit()
 
 
