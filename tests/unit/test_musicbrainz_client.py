@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import httpx
 import pytest
 
@@ -171,8 +173,108 @@ def test_network_failure_raises_provider_error():
         raise httpx.ConnectTimeout("timed out", request=request)
 
     client = MusicBrainzClient(client=_client_with(handler))
-    with pytest.raises(ProviderError):
+    with (
+        patch("offcatalog.musicbrainz.client.time.sleep"),
+        pytest.raises(ProviderError),
+    ):
         client.search_recording(make_track())
+
+
+def test_get_retries_on_503_then_succeeds():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(503, text="Service Unavailable")
+        return httpx.Response(200, json={"count": 0, "recordings": []})
+
+    client = MusicBrainzClient(client=_client_with(handler))
+    with patch("offcatalog.musicbrainz.client.time.sleep") as mock_sleep:
+        results = client.search_recording(make_track())
+
+    assert results == []
+    assert calls["n"] == 3
+    assert mock_sleep.call_count == 2  # slept before each of the 2 retries
+
+
+def test_get_raises_provider_error_after_exhausting_503_retries():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(503, text="Service Unavailable")
+
+    client = MusicBrainzClient(client=_client_with(handler))
+    with (
+        patch("offcatalog.musicbrainz.client.time.sleep"),
+        pytest.raises(ProviderError),
+    ):
+        client.search_recording(make_track())
+
+    assert calls["n"] == 3  # 1 initial attempt + 2 retries, then gives up
+
+
+def test_get_retries_on_timeout_then_succeeds():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise httpx.ReadTimeout("timed out", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "title": "T",
+                "length": 1000,
+                "disambiguation": "",
+                "isrcs": [],
+            },
+        )
+
+    client = MusicBrainzClient(client=_client_with(handler))
+    with patch("offcatalog.musicbrainz.client.time.sleep"):
+        recording = client.lookup_by_mbid("x")
+
+    assert recording is not None
+    assert calls["n"] == 2
+
+
+def test_get_does_not_retry_non_retryable_status_codes():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(400, text="Bad Request")
+
+    client = MusicBrainzClient(client=_client_with(handler))
+    with (
+        patch("offcatalog.musicbrainz.client.time.sleep") as mock_sleep,
+        pytest.raises(ProviderError),
+    ):
+        client.search_recording(make_track())
+
+    assert calls["n"] == 1  # no retry budget spent on a non-transient error
+    mock_sleep.assert_not_called()
+
+
+def test_rate_limiter_wait_called_once_per_attempt_including_retries():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(503, text="Service Unavailable")
+
+    limiter = _FakeRateLimiter()
+    client = MusicBrainzClient(client=_client_with(handler), rate_limiter=limiter)
+    with (
+        patch("offcatalog.musicbrainz.client.time.sleep"),
+        pytest.raises(ProviderError),
+    ):
+        client.search_recording(make_track())
+
+    assert limiter.calls == calls["n"] == 3
 
 
 def test_malformed_json_raises_provider_error():
