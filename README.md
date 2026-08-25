@@ -12,9 +12,9 @@ and produces:
   and
 - CSV reports (`unavailable.csv`, `ambiguous.csv`, `errors.csv`).
 
-It never guesses in favor of "available" — see
-[`docs/matching.md`](docs/matching.md) for how the matching engine is
-biased against false positives.
+It never guesses in favor of "available" — a fuzzy title match alone can
+never mark a track available; only an ISRC-exact hit or a full
+artist+title+duration+qualifier match can.
 
 ## Requirements
 
@@ -70,9 +70,7 @@ only selects which *storage key* results are recorded under — Deezer is
 always the provider actually queried, since it's the only one implemented.
 The name is validated against the provider registry, so a typo or a
 not-yet-implemented provider fails fast instead of recording results under a
-bogus provider row.
-See [`docs/provider-selection.md`](docs/provider-selection.md) and
-`TODO.md`.
+bogus provider row. See `TODO.md`.
 
 ### Configuration
 
@@ -162,8 +160,9 @@ Local:  depeche mode - enjoy the silence (401.0s)
 [s]ame / [d]ifferent / [k]ip [k]:
 ```
 
-This is deliberate — see [`docs/matching.md`](docs/matching.md). Run
-`review` and confirm it by hand; your decision is permanent (see below).
+This is deliberate — a strong text-similarity score alone is only ever
+grounds for a human review prompt, never an automatic verdict. Run `review`
+and confirm it by hand; your decision is permanent (see below).
 
 **How do I work through a big review queue efficiently?**
 
@@ -240,11 +239,9 @@ your end.
 
 **Does anything ever get uploaded — my file paths, the audio itself?**
 
-No. Only normalized artist/title text (or a bare ISRC) is sent to
-Deezer's public search endpoint — never file paths, audio, or raw ID3
-tag text. See ["What leaves this
-machine"](docs/architecture.md#what-leaves-this-machine) for the exact
-breakdown.
+No. Only normalized artist/title text (or a bare ISRC) is sent to Deezer's
+and MusicBrainz's public search endpoints — never file paths, audio, or raw
+ID3 tag text.
 
 **How do I run this on a schedule / homelab server instead of my laptop?**
 
@@ -266,12 +263,6 @@ etc.) before it's fully wired up end-to-end.
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — module layout, database
-  schema, provider protocol, what data leaves the machine.
-- [`docs/matching.md`](docs/matching.md) — the three match levels, version
-  qualifiers, and the five availability states.
-- [`docs/provider-selection.md`](docs/provider-selection.md) — why Deezer
-  was chosen and what's pending for a second provider.
 - [`docs/navidrome.md`](docs/navidrome.md) — running alongside Navidrome.
 - [`TODO.md`](TODO.md) — tracked future work and why each item is deferred.
 

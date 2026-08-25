@@ -7,9 +7,8 @@ Tracked future work. Each item is deliberately out of scope for v1 — see the
 
 - **Spotify as provider #2.** Blocked on manually verifying whether
   Spotify's Development Mode now requires a Premium account — sourcing on
-  this was conflicting/thin during research and was left unconfirmed
-  (`docs/provider-selection.md`). Verify before starting this work; it
-  doesn't block anything else.
+  this was conflicting/thin during research and was left unconfirmed.
+  Verify before starting this work; it doesn't block anything else.
 - **Apple Music provider.** Deferred on cost/auth friction: requires a paid
   Apple Developer Program account ($99/yr) plus MusicKit JWT signing, both
   disproportionate for a personal-project provider #3.
@@ -101,4 +100,4 @@ Tracked future work. Each item is deliberately out of scope for v1 — see the
 - No web UI — this is a CLI tool by design.
 - No YouTube Music or Tidal/Amazon Music providers — excluded outright
   during provider research for lacking any legitimate self-serve API
-  access (see `docs/provider-selection.md`), not merely deferred.
+  access, not merely deferred.
