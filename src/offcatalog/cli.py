@@ -303,6 +303,12 @@ def review(
         typer.echo(
             f"\nLocal:  {track_row['artist']} - {track_row['title']} ({track_row['duration_seconds']}s)"
         )
+        mb_isrc = track_row["musicbrainz_isrc"]
+        mb_disambiguation = track_row["musicbrainz_disambiguation"]
+        if mb_isrc or mb_disambiguation:
+            typer.echo(
+                f'  MB: isrc={mb_isrc or "none"} disambiguation="{mb_disambiguation or ""}"'
+            )
         candidates = list_candidates_for_track(conn, track_row["id"], provider_name)
         for i, candidate in enumerate(candidates):
             typer.echo(
@@ -310,7 +316,12 @@ def review(
                 f"({candidate['provider_duration']}s) score={candidate['match_score']:.2f}"
             )
 
-        choice = typer.prompt("[s]ame / [d]ifferent / [k]ip", default="k")
+        # MusicBrainz never auto-resolves a decision -- it only changes what's
+        # pre-filled; the human still has to hit enter to confirm.
+        default_choice = "k"
+        if candidates and mb_isrc and candidates[0]["provider_isrc"] == mb_isrc:
+            default_choice = "s"
+        choice = typer.prompt("[s]ame / [d]ifferent / [k]ip", default=default_choice)
         if choice in ("s", "d") and candidates:
             if len(candidates) > 1:
                 index = int(

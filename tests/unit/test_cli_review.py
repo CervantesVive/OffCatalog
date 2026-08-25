@@ -203,3 +203,93 @@ def test_review_rejects_unknown_provider_and_creates_no_provider_row(tmp_path):
     conn = get_connection(str(db_path))
     rows = conn.execute("SELECT name FROM providers WHERE name = 'bogus'").fetchall()
     assert rows == []
+
+
+def test_review_displays_musicbrainz_metadata_line(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = get_connection(db_path)
+    _seed_ambiguous_track(conn)
+    conn.execute(
+        "UPDATE local_tracks SET musicbrainz_isrc = ?, musicbrainz_disambiguation = ?",
+        ("GBAYE9000212", "live, 1990-07-06"),
+    )
+    conn.commit()
+    conn.close()
+
+    with patch("typer.prompt", return_value="k"):
+        result = runner.invoke(app, ["review", "--db", db_path, "--provider", "deezer"])
+
+    assert result.exit_code == 0, result.output
+    assert 'MB: isrc=GBAYE9000212 disambiguation="live, 1990-07-06"' in result.output
+
+
+def test_review_omits_musicbrainz_line_when_no_data(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = get_connection(db_path)
+    _seed_ambiguous_track(conn)
+    conn.close()
+
+    with patch("typer.prompt", return_value="k"):
+        result = runner.invoke(app, ["review", "--db", db_path, "--provider", "deezer"])
+
+    assert "MB:" not in result.output
+
+
+def test_review_defaults_to_same_when_musicbrainz_isrc_matches_top_candidate(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = get_connection(db_path)
+    track = _seed_track(conn)
+    candidate = {
+        "provider_track_id": "1",
+        "artist": "Artist",
+        "title": "Title (Remix)",
+        "album": "Album",
+        "duration_seconds": 400.0,
+        "isrc": "GBAYE9000212",
+    }
+    result = MatchResult(
+        state=AvailabilityState.AMBIGUOUS,
+        score=0.7,
+        reason="fuzzy_candidate",
+        candidate=None,
+        all_candidates=[candidate],
+    )
+    record_check_result(conn, track.id, "deezer", result)
+    conn.execute("UPDATE local_tracks SET musicbrainz_isrc = ?", ("GBAYE9000212",))
+    conn.commit()
+    conn.close()
+
+    with patch("typer.prompt", return_value="k") as mock_prompt:
+        runner.invoke(app, ["review", "--db", db_path, "--provider", "deezer"])
+
+    assert mock_prompt.call_args.kwargs["default"] == "s"
+
+
+def test_review_defaults_to_skip_when_musicbrainz_isrc_does_not_match(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = get_connection(db_path)
+    track = _seed_track(conn)
+    candidate = {
+        "provider_track_id": "1",
+        "artist": "Artist",
+        "title": "Title (Remix)",
+        "album": "Album",
+        "duration_seconds": 400.0,
+        "isrc": "GBAYE9000212",
+    }
+    result = MatchResult(
+        state=AvailabilityState.AMBIGUOUS,
+        score=0.7,
+        reason="fuzzy_candidate",
+        candidate=None,
+        all_candidates=[candidate],
+    )
+    record_check_result(conn, track.id, "deezer", result)
+    conn.execute("UPDATE local_tracks SET musicbrainz_isrc = ?", ("USUM71703861",))
+    conn.commit()
+    conn.close()
+
+    with patch("typer.prompt", return_value="k") as mock_prompt:
+        runner.invoke(app, ["review", "--db", db_path, "--provider", "deezer"])
+
+    assert mock_prompt.call_args.kwargs["default"] == "k"
