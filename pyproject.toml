@@ -1,6 +1,6 @@
 [project]
 name = "offcatalog"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first CLI that scans an MP3 collection and flags tracks not available on streaming (Deezer + MusicBrainz)."
 readme = "README.md"
 license = { text = "MIT" }
