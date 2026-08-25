@@ -267,3 +267,68 @@ def test_check_persists_progress_across_interrupted_run(tmp_path):
     assert (
         checked_count == 1
     )  # first track's result persisted even though run was limited/interrupted
+
+
+def test_check_uses_musicbrainz_isrc_fallback_when_embedded_isrc_missing(tmp_path):
+    from offcatalog.db.repository import upsert_file, upsert_local_track
+    from offcatalog.models import LocalTrack, RawTags
+
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    raw = RawTags(
+        "Depeche Mode", "Enjoy The Silence", "Violator", None, None, None, None,
+        None, None, None,
+    )
+    track = LocalTrack(
+        id="/x.mp3",
+        path="/x.mp3",
+        filename="/x.mp3",
+        raw=raw,
+        artist="depeche mode",
+        album_artist=None,
+        title="enjoy the silence",
+        album="violator",
+        version_qualifiers=[],
+        track_number=None,
+        disc_number=None,
+        duration_seconds=258.0,
+        year=None,
+        isrc=None,
+        musicbrainz_track_id=None,
+        musicbrainz_recording_id=None,
+        fingerprint="/x.mp3",
+    )
+    file_id = upsert_file(conn, "/x.mp3", 1.0, 1, "/x.mp3")
+    upsert_local_track(conn, file_id, track)
+    conn.execute(
+        "UPDATE local_tracks SET musicbrainz_isrc = ?", ("GBAYE9000212",)
+    )
+    conn.commit()
+    conn.close()
+
+    def handler(request):
+        if "isrc:GBAYE9000212" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "id": 1,
+                    "title": "Enjoy the Silence",
+                    "duration": 258,
+                    "isrc": "GBAYE9000212",
+                    "artist": {"name": "Depeche Mode"},
+                    "album": {"title": "Violator"},
+                },
+            )
+        # The search fallback must never be reached -- if it is, the isrc
+        # merge in _row_to_track didn't happen and this proves it by giving
+        # zero candidates, which would produce UNAVAILABLE, not AVAILABLE.
+        return httpx.Response(200, json={"data": []})
+
+    with patch("offcatalog.cli.DeezerProvider", side_effect=_fake_deezer(handler)):
+        result = runner.invoke(app, ["check", "--db", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    conn = get_connection(str(db_path))
+    row = conn.execute("SELECT state, reason FROM availability_results").fetchone()
+    assert row["state"] == "AVAILABLE"
+    assert row["reason"] == "isrc_exact"

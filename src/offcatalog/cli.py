@@ -57,7 +57,7 @@ def _row_to_track(row) -> LocalTrack:
         disc_number=row["disc_number"],
         duration_seconds=row["duration_seconds"],
         year=row["year"],
-        isrc=row["isrc"],
+        isrc=row["isrc"] or row["musicbrainz_isrc"],
         musicbrainz_track_id=row["musicbrainz_track_id"],
         musicbrainz_recording_id=row["musicbrainz_recording_id"],
         fingerprint="",
