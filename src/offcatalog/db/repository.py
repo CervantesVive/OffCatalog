@@ -219,8 +219,9 @@ def record_check_result(
             """
             INSERT INTO provider_candidates (
                 id, local_track_id, provider_id, provider_track_id, provider_artist,
-                provider_title, provider_album, provider_duration, match_score, match_reason, checked_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                provider_title, provider_album, provider_duration, match_score, match_reason,
+                checked_at, provider_isrc
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 best_candidate_id,
@@ -234,6 +235,7 @@ def record_check_result(
                 result.score,
                 result.reason,
                 _now(),
+                result.candidate["isrc"],
             ),
         )
     elif result.state == AvailabilityState.AMBIGUOUS:
@@ -242,8 +244,9 @@ def record_check_result(
                 """
                 INSERT INTO provider_candidates (
                     id, local_track_id, provider_id, provider_track_id, provider_artist,
-                    provider_title, provider_album, provider_duration, match_score, match_reason, checked_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    provider_title, provider_album, provider_duration, match_score, match_reason,
+                    checked_at, provider_isrc
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     str(uuid.uuid4()),
@@ -257,6 +260,7 @@ def record_check_result(
                     result.score,
                     result.reason,
                     _now(),
+                    candidate["isrc"],
                 ),
             )
 
@@ -293,6 +297,31 @@ def get_checked_fingerprint(
         (local_track_id, provider_id),
     ).fetchone()
     return row["checked_fingerprint"] if row else None
+
+
+def get_musicbrainz_checked_fingerprint(
+    conn: sqlite3.Connection, local_track_id: str
+) -> str | None:
+    row = conn.execute(
+        "SELECT musicbrainz_checked_fingerprint FROM local_tracks WHERE id = ?",
+        (local_track_id,),
+    ).fetchone()
+    return row["musicbrainz_checked_fingerprint"] if row else None
+
+
+def record_musicbrainz_enrichment(
+    conn: sqlite3.Connection,
+    local_track_id: str,
+    isrc: str | None,
+    disambiguation: str | None,
+    checked_fingerprint: str,
+) -> None:
+    conn.execute(
+        "UPDATE local_tracks SET musicbrainz_isrc = ?, musicbrainz_disambiguation = ?, "
+        "musicbrainz_checked_fingerprint = ? WHERE id = ?",
+        (isrc, disambiguation, checked_fingerprint, local_track_id),
+    )
+    conn.commit()
 
 
 def list_unavailable_everywhere(conn: sqlite3.Connection) -> list[sqlite3.Row]:
