@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from offcatalog.models import LocalTrack, RawTags
-from offcatalog.musicbrainz.client import MusicBrainzClient
+from offcatalog.musicbrainz.client import MusicBrainzClient, _USER_AGENT
 from offcatalog.providers.base import ProviderError
 
 
@@ -194,6 +194,16 @@ def test_rate_limiter_wait_called_once_per_http_request():
 
     client.search_recording(make_track())
     assert limiter.calls == 1
+
+
+def test_default_client_includes_user_agent_header():
+    """Verify User-Agent header is set when MusicBrainzClient is constructed without an injected client.
+
+    This ensures the MusicBrainz rate-limit policy requirement is enforced even if
+    a caller forgets to provide a custom client with User-Agent headers.
+    """
+    client = MusicBrainzClient()
+    assert client._client.headers["User-Agent"] == _USER_AGENT
 
 
 @pytest.mark.manual
