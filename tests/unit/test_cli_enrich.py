@@ -11,7 +11,14 @@ from offcatalog.models import LocalTrack, RawTags
 runner = CliRunner()
 
 
-def _seed_track(conn, path, *, musicbrainz_recording_id=None, fingerprint=None):
+def _seed_track(
+    conn,
+    path,
+    *,
+    musicbrainz_recording_id=None,
+    fingerprint=None,
+    version_qualifiers=None,
+):
     raw = RawTags(
         "Depeche Mode", "Enjoy The Silence", "Violator", None, None, None, None,
         None, None, musicbrainz_recording_id,
@@ -25,7 +32,7 @@ def _seed_track(conn, path, *, musicbrainz_recording_id=None, fingerprint=None):
         album_artist=None,
         title="enjoy the silence",
         album="violator",
-        version_qualifiers=[],
+        version_qualifiers=version_qualifiers or [],
         track_number=None,
         disc_number=None,
         duration_seconds=258.0,
@@ -80,6 +87,7 @@ def test_enrich_uses_direct_mbid_lookup_when_embedded(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "Enriched 1 track(s), 1 ISRC(s) found" in result.output
+    assert "depeche mode - enjoy the silence: isrc GBAYE9000212" in result.output
     assert calls == ["/ws/2/recording/7c8837fa-30ec-4427-9eb4-ef23f649eea3"]
     conn = get_connection(str(db_path))
     row = conn.execute("SELECT musicbrainz_isrc FROM local_tracks").fetchone()
@@ -189,6 +197,50 @@ def test_enrich_records_not_found_and_skips_unchanged_track_on_rerun(tmp_path):
 
     assert "Enriched 0 track(s), 0 ISRC(s) found" in result2.output
     assert calls == ["/ws/2/recording/"]  # only the first run's search call
+
+
+def test_enrich_skips_search_fallback_for_qualified_track_without_embedded_mbid(
+    tmp_path,
+):
+    # Regression for the wrong-version-ISRC bug: a qualified track (e.g. a
+    # remix) with no embedded MBID must never go through search-fallback,
+    # because the search query is built from the qualifier-stripped base
+    # title and can't tell a remix apart from the plain album version. If it
+    # did, this handler would hand back a score-100, duration-matching
+    # candidate for the *plain* version and the wrong ISRC would get stored.
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    _seed_track(conn, "/x.mp3", version_qualifiers=["hands and feet mix"])
+    conn.close()
+
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={
+                "count": 1,
+                "recordings": [
+                    {
+                        "id": "plain-version-wrong-recording",
+                        "score": 100,
+                        "title": "Enjoy the Silence",
+                        "length": 258000,  # matches local duration exactly
+                        "disambiguation": "",
+                    }
+                ],
+            },
+        )
+
+    with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(handler)):
+        result = runner.invoke(app, ["enrich", "--db", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    assert calls == []  # search-fallback must never be invoked for a qualified track
+    conn = get_connection(str(db_path))
+    row = conn.execute("SELECT musicbrainz_isrc FROM local_tracks").fetchone()
+    assert row["musicbrainz_isrc"] is None
 
 
 def test_enrich_isolates_per_track_failure(tmp_path):

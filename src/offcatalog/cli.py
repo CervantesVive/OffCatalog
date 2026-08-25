@@ -166,6 +166,9 @@ def enrich(
             errors += 1
             typer.echo(f"Skipping {row['artist']} - {row['title']}: {exc}", err=True)
             continue
+        typer.echo(
+            f"{row['artist']} - {row['title']}: {'isrc ' + isrc if isrc else 'not found'}"
+        )
         if isrc:
             found += 1
         enriched += 1
@@ -177,6 +180,11 @@ def enrich(
 def _search_best_recording(
     client: MusicBrainzClient, track: LocalTrack
 ) -> MBRecording | None:
+    if track.version_qualifiers:
+        # ponytail: search-fallback can't safely disambiguate versions from a
+        # qualifier-stripped title match alone -- skip for qualified tracks;
+        # embedded-MBID enrichment (exact) still works for them.
+        return None
     candidates = client.search_recording(track)
     best: MBRecording | None = None
     for candidate in candidates:
