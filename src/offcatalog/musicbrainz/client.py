@@ -11,7 +11,7 @@ from offcatalog.providers.base import ProviderError
 if TYPE_CHECKING:
     from offcatalog.models import LocalTrack
 
-_USER_AGENT = "OffCatalog/0.1 ( https://github.com/offcatalog/offcatalog )"
+_USER_AGENT = "OffCatalog/0.1 ( https://github.com/CervantesVive/OffCatalog )"
 
 # MusicBrainz's server occasionally 503s or times out under its own transient
 # load -- observed in real usage as scattered failures interspersed with many
