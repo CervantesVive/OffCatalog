@@ -12,12 +12,14 @@ from offcatalog.db.repository import (
     get_checked_fingerprint,
     get_file_by_path,
     get_file_path_for_track,
+    get_musicbrainz_checked_fingerprint,
     list_ambiguous_tracks,
     list_candidates_for_track,
     list_tracks_by_state,
     list_unavailable_everywhere,
     record_check_result,
     record_manual_decision,
+    record_musicbrainz_enrichment,
     soft_delete_missing_files,
     upsert_file,
     upsert_local_track,
@@ -25,6 +27,7 @@ from offcatalog.db.repository import (
 from offcatalog.matching.engine import match_track
 from offcatalog.matching.types import AvailabilityState
 from offcatalog.models import LocalTrack, RawTags
+from offcatalog.musicbrainz.client import MBRecording, MusicBrainzClient
 from offcatalog.playlist import write_m3u8
 from offcatalog.providers.base import PROVIDER_REGISTRY
 from offcatalog.providers.deezer import DeezerProvider
@@ -33,6 +36,9 @@ from offcatalog.reports import write_csv_report
 from offcatalog.scanning.extract import extract_local_track
 
 app = typer.Typer(help="Scan an MP3 collection and find tracks not on streaming.")
+
+_MB_SCORE_FLOOR = 90.0
+_MB_DURATION_TOLERANCE_SECONDS = 4.0  # mirrors matching.engine's default duration gate
 
 
 def _row_to_track(row) -> LocalTrack:
@@ -114,6 +120,82 @@ def scan(
         f"Scanned: {added} added/changed, {skipped} unchanged, {deleted} deleted, {errors} error(s) -> {db}"
     )
     conn.close()
+
+
+@app.command()
+def enrich(
+    db: str = typer.Option(
+        "offcatalog.db",
+        "--db",
+        envvar="OFFCATALOG_DB",
+        help="Path to the SQLite database",
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Max tracks to enrich this run"
+    ),
+) -> None:
+    conn = get_connection(db)
+    rate_limiter = TokenBucket(rate=1, per_seconds=1.0)
+    client = MusicBrainzClient(rate_limiter=rate_limiter)
+    rows = conn.execute(
+        "SELECT lt.*, f.fingerprint AS current_fingerprint "
+        "FROM local_tracks lt JOIN files f ON f.id = lt.file_id"
+    ).fetchall()
+
+    enriched = 0
+    found = 0
+    errors = 0
+    for row in rows:
+        if limit is not None and enriched >= limit:
+            break
+        fingerprint = row["current_fingerprint"]
+        if get_musicbrainz_checked_fingerprint(conn, row["id"]) == fingerprint:
+            continue
+        try:
+            track = _row_to_track(row)
+            if track.musicbrainz_recording_id:
+                recording = client.lookup_by_mbid(track.musicbrainz_recording_id)
+            else:
+                recording = _search_best_recording(client, track)
+            isrc = recording["isrc"] if recording else None
+            disambiguation = recording["disambiguation"] if recording else None
+            record_musicbrainz_enrichment(
+                conn, row["id"], isrc, disambiguation, fingerprint
+            )
+        except Exception as exc:  # noqa: BLE001 — per-track isolation, same as check()
+            errors += 1
+            typer.echo(f"Skipping {row['artist']} - {row['title']}: {exc}", err=True)
+            continue
+        if isrc:
+            found += 1
+        enriched += 1
+
+    typer.echo(f"Enriched {enriched} track(s), {found} ISRC(s) found, {errors} error(s)")
+    conn.close()
+
+
+def _search_best_recording(
+    client: MusicBrainzClient, track: LocalTrack
+) -> MBRecording | None:
+    candidates = client.search_recording(track)
+    best: MBRecording | None = None
+    for candidate in candidates:
+        if candidate["score"] < _MB_SCORE_FLOOR:
+            continue
+        if candidate["duration_seconds"] is None:
+            continue
+        if (
+            abs(candidate["duration_seconds"] - track.duration_seconds)
+            > _MB_DURATION_TOLERANCE_SECONDS
+        ):
+            continue
+        if best is None or candidate["score"] > best["score"]:
+            best = candidate
+    if best is None:
+        return None
+    # search results never carry an ISRC (live-verified) -- resolve it with a
+    # second, exact lookup on the chosen candidate's MBID.
+    return client.lookup_by_mbid(best["mbid"])
 
 
 @app.command()
