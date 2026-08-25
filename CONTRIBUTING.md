@@ -33,3 +33,18 @@ required before merging.
 
 Open a GitHub issue. For security issues, see [SECURITY.md](SECURITY.md)
 instead of a public issue.
+
+## Releasing (maintainers)
+
+Versions are [SemVer](https://semver.org/) git tags (`vX.Y.Z`), bumped
+manually — patch for fixes, minor for new features, major for breaking
+changes.
+
+1. Bump `version` in `pyproject.toml`.
+2. Commit: `git commit -am "chore: bump version to X.Y.Z"` and push to `main`.
+3. Tag and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+4. The `release` workflow (`.github/workflows/release.yml`) runs the test
+   suite, builds the package with `uv build`, and publishes a GitHub
+   Release with auto-generated notes (from merged PRs/commits since the
+   last tag) and the built wheel/sdist attached. No manual changelog file
+   to maintain.
