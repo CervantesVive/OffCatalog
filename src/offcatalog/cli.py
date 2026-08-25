@@ -173,7 +173,9 @@ def enrich(
             found += 1
         enriched += 1
 
-    typer.echo(f"Enriched {enriched} track(s), {found} ISRC(s) found, {errors} error(s)")
+    typer.echo(
+        f"Enriched {enriched} track(s), {found} ISRC(s) found, {errors} error(s)"
+    )
     conn.close()
 
 

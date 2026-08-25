@@ -276,8 +276,16 @@ def test_check_uses_musicbrainz_isrc_fallback_when_embedded_isrc_missing(tmp_pat
     db_path = tmp_path / "catalog.db"
     conn = get_connection(str(db_path))
     raw = RawTags(
-        "Depeche Mode", "Enjoy The Silence", "Violator", None, None, None, None,
-        None, None, None,
+        "Depeche Mode",
+        "Enjoy The Silence",
+        "Violator",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
     track = LocalTrack(
         id="/x.mp3",
@@ -300,9 +308,7 @@ def test_check_uses_musicbrainz_isrc_fallback_when_embedded_isrc_missing(tmp_pat
     )
     file_id = upsert_file(conn, "/x.mp3", 1.0, 1, "/x.mp3")
     upsert_local_track(conn, file_id, track)
-    conn.execute(
-        "UPDATE local_tracks SET musicbrainz_isrc = ?", ("GBAYE9000212",)
-    )
+    conn.execute("UPDATE local_tracks SET musicbrainz_isrc = ?", ("GBAYE9000212",))
     conn.commit()
     conn.close()
 

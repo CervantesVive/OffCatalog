@@ -20,8 +20,16 @@ def _seed_track(
     version_qualifiers=None,
 ):
     raw = RawTags(
-        "Depeche Mode", "Enjoy The Silence", "Violator", None, None, None, None,
-        None, None, musicbrainz_recording_id,
+        "Depeche Mode",
+        "Enjoy The Silence",
+        "Violator",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        musicbrainz_recording_id,
     )
     track = LocalTrack(
         id=path,
@@ -64,7 +72,9 @@ def _fake_client(handler):
 def test_enrich_uses_direct_mbid_lookup_when_embedded(tmp_path):
     db_path = tmp_path / "catalog.db"
     conn = get_connection(str(db_path))
-    _seed_track(conn, "/x.mp3", musicbrainz_recording_id="7c8837fa-30ec-4427-9eb4-ef23f649eea3")
+    _seed_track(
+        conn, "/x.mp3", musicbrainz_recording_id="7c8837fa-30ec-4427-9eb4-ef23f649eea3"
+    )
     conn.close()
 
     calls = []
@@ -167,7 +177,9 @@ def test_enrich_rejects_search_candidate_outside_duration_tolerance(tmp_path):
                     ],
                 },
             )
-        raise AssertionError("lookup_by_mbid should not be called for a rejected candidate")
+        raise AssertionError(
+            "lookup_by_mbid should not be called for a rejected candidate"
+        )
 
     with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(handler)):
         result = runner.invoke(app, ["enrich", "--db", str(db_path)])
@@ -261,7 +273,9 @@ def test_enrich_isolates_per_track_failure(tmp_path):
             return httpx.Response(200, text="not json")
         return httpx.Response(200, json={"count": 0, "recordings": []})
 
-    with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(flaky_handler)):
+    with patch(
+        "offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(flaky_handler)
+    ):
         result = runner.invoke(app, ["enrich", "--db", str(db_path)])
 
     assert result.exit_code == 0, result.output

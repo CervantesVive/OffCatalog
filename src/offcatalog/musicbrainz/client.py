@@ -31,7 +31,9 @@ class MusicBrainzClient:
         self._rate_limiter = rate_limiter
 
     def lookup_by_mbid(self, recording_id: str) -> MBRecording | None:
-        data = self._get(f"/recording/{recording_id}", params={"inc": "isrcs", "fmt": "json"})
+        data = self._get(
+            f"/recording/{recording_id}", params={"inc": "isrcs", "fmt": "json"}
+        )
         if data is None:
             return None
         return self._to_recording(data, score=100.0)
@@ -74,7 +76,9 @@ class MusicBrainzClient:
                 mbid=item["id"],
                 isrc=isrcs[0] if isrcs else None,
                 disambiguation=item.get("disambiguation") or None,
-                duration_seconds=(length_ms / 1000.0) if length_ms is not None else None,
+                duration_seconds=(length_ms / 1000.0)
+                if length_ms is not None
+                else None,
                 score=score,
             )
         except (KeyError, TypeError, ValueError) as exc:

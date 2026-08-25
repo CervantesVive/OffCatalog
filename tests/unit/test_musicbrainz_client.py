@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from offcatalog.models import LocalTrack, RawTags
-from offcatalog.musicbrainz.client import MusicBrainzClient, _USER_AGENT
+from offcatalog.musicbrainz.client import _USER_AGENT, MusicBrainzClient
 from offcatalog.providers.base import ProviderError
 
 
@@ -37,7 +37,9 @@ def _client_with(handler) -> httpx.Client:
 
 def test_lookup_by_mbid_returns_recording_with_isrc():
     def handler(request):
-        assert request.url.path == "/ws/2/recording/b4385da6-fb3a-432d-9239-cec162ea6367"
+        assert (
+            request.url.path == "/ws/2/recording/b4385da6-fb3a-432d-9239-cec162ea6367"
+        )
         assert request.url.params["inc"] == "isrcs"
         return httpx.Response(
             200,
@@ -63,7 +65,13 @@ def test_lookup_by_mbid_returns_none_when_isrcs_list_is_empty():
     def handler(request):
         return httpx.Response(
             200,
-            json={"id": "x", "title": "T", "length": 1000, "disambiguation": "", "isrcs": []},
+            json={
+                "id": "x",
+                "title": "T",
+                "length": 1000,
+                "disambiguation": "",
+                "isrcs": [],
+            },
         )
 
     client = MusicBrainzClient(client=_client_with(handler))
@@ -133,8 +141,16 @@ def test_search_recording_sends_normalized_fields_not_raw_tags():
 
     track = make_track(
         raw=RawTags(
-            "DEPECHE MODE!!", "Enjoy The Silence (Örig. Mix)", None, None, None,
-            None, None, None, None, None,
+            "DEPECHE MODE!!",
+            "Enjoy The Silence (Örig. Mix)",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ),
         artist="depeche mode",
         title="enjoy the silence",
