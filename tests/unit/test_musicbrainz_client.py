@@ -168,6 +168,28 @@ def test_search_recording_sends_normalized_fields_not_raw_tags():
     assert "Örig. Mix" not in query
 
 
+def test_search_recording_does_not_phrase_quote_artist():
+    # A quoted phrase requires exact token order, so tag spellings that differ
+    # from MusicBrainz's canonical artist name (e.g. "juan luis guerra y la
+    # 440" vs "Juan Luis Guerra 4.40") never match and search wrongly returns
+    # zero results. The artist field must be an unquoted/parenthesized term
+    # group so token order doesn't matter; the title stays phrase-quoted.
+    captured_queries = []
+
+    def handler(request):
+        captured_queries.append(request.url.params["query"])
+        return httpx.Response(200, json={"count": 0, "recordings": []})
+
+    track = make_track(artist="juan luis guerra y la 440", title="la cosquillita")
+    client = MusicBrainzClient(client=_client_with(handler))
+    client.search_recording(track)
+
+    query = captured_queries[0]
+    assert 'artist:"juan luis guerra y la 440"' not in query
+    assert "artist:(juan luis guerra y la 440)" in query
+    assert 'recording:"la cosquillita"' in query
+
+
 def test_network_failure_raises_provider_error():
     def handler(request):
         raise httpx.ConnectTimeout("timed out", request=request)

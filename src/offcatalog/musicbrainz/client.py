@@ -50,7 +50,11 @@ class MusicBrainzClient:
         return self._to_recording(data, score=100.0)
 
     def search_recording(self, track: LocalTrack) -> list[MBRecording]:
-        query = f'artist:"{track.artist}" AND recording:"{track.title}"'
+        # artist is an unquoted term group, not a phrase: tag spellings often
+        # diverge from MusicBrainz's canonical artist name in token order/form
+        # (e.g. "y la 440" vs "4.40"), and a quoted phrase requires exact
+        # token-adjacency match, so it wrongly returns zero results.
+        query = f'artist:({track.artist}) AND recording:"{track.title}"'
         data = self._get("/recording/", params={"query": query, "fmt": "json"})
         if data is None:
             return []
