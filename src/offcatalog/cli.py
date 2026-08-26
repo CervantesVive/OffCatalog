@@ -133,6 +133,11 @@ def enrich(
     limit: int | None = typer.Option(
         None, "--limit", help="Max tracks to enrich this run"
     ),
+    dry_run: int | None = typer.Option(
+        None,
+        "--dry-run",
+        help="Attempt to enrich N tracks without writing changes to the database",
+    ),
 ) -> None:
     conn = get_connection(db)
     rate_limiter = TokenBucket(rate=1, per_seconds=1.0)
@@ -142,11 +147,12 @@ def enrich(
         "FROM local_tracks lt JOIN files f ON f.id = lt.file_id"
     ).fetchall()
 
+    effective_limit = dry_run if dry_run is not None else limit
     enriched = 0
     found = 0
     errors = 0
     for row in rows:
-        if limit is not None and enriched >= limit:
+        if effective_limit is not None and enriched >= effective_limit:
             break
         fingerprint = row["current_fingerprint"]
         if get_musicbrainz_checked_fingerprint(conn, row["id"]) == fingerprint:
@@ -159,9 +165,10 @@ def enrich(
                 recording = _search_best_recording(client, track)
             isrc = recording["isrc"] if recording else None
             disambiguation = recording["disambiguation"] if recording else None
-            record_musicbrainz_enrichment(
-                conn, row["id"], isrc, disambiguation, fingerprint
-            )
+            if dry_run is None:
+                record_musicbrainz_enrichment(
+                    conn, row["id"], isrc, disambiguation, fingerprint
+                )
         except Exception as exc:  # noqa: BLE001 — per-track isolation, same as check()
             errors += 1
             typer.echo(f"Skipping {row['artist']} - {row['title']}: {exc}", err=True)
@@ -173,8 +180,9 @@ def enrich(
             found += 1
         enriched += 1
 
+    prefix = "[dry-run] " if dry_run is not None else ""
     typer.echo(
-        f"Enriched {enriched} track(s), {found} ISRC(s) found, {errors} error(s)"
+        f"{prefix}Enriched {enriched} track(s), {found} ISRC(s) found, {errors} error(s)"
     )
     conn.close()
 
@@ -188,24 +196,29 @@ def _search_best_recording(
         # embedded-MBID enrichment (exact) still works for them.
         return None
     candidates = client.search_recording(track)
-    best: MBRecording | None = None
-    for candidate in candidates:
-        if candidate["score"] < _MB_SCORE_FLOOR:
-            continue
-        if candidate["duration_seconds"] is None:
-            continue
-        if (
-            abs(candidate["duration_seconds"] - track.duration_seconds)
-            > _MB_DURATION_TOLERANCE_SECONDS
-        ):
-            continue
-        if best is None or candidate["score"] > best["score"]:
-            best = candidate
-    if best is None:
+    valid = [
+        candidate
+        for candidate in candidates
+        if candidate["score"] >= _MB_SCORE_FLOOR
+        and candidate["duration_seconds"] is not None
+        and abs(candidate["duration_seconds"] - track.duration_seconds)
+        <= _MB_DURATION_TOLERANCE_SECONDS
+    ]
+    if not valid:
         return None
-    # search results never carry an ISRC (live-verified) -- resolve it with a
-    # second, exact lookup on the chosen candidate's MBID.
-    return client.lookup_by_mbid(best["mbid"])
+    valid.sort(key=lambda candidate: candidate["score"], reverse=True)
+    # search results never carry an ISRC (live-verified) -- resolve each
+    # candidate with an exact lookup by MBID. MusicBrainz frequently has no
+    # ISRC on the top-scoring recording entity even when it's the right
+    # match, so keep trying the next-best valid candidate before giving up.
+    fallback: MBRecording | None = None
+    for candidate in valid:
+        recording = client.lookup_by_mbid(candidate["mbid"])
+        if fallback is None:
+            fallback = recording
+        if recording and recording["isrc"]:
+            return recording
+    return fallback
 
 
 @app.command()

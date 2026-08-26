@@ -255,6 +255,215 @@ def test_enrich_skips_search_fallback_for_qualified_track_without_embedded_mbid(
     assert row["musicbrainz_isrc"] is None
 
 
+def test_enrich_tries_next_candidate_when_top_scoring_recording_has_no_isrc(tmp_path):
+    # Regression: MusicBrainz frequently has no ISRC on the top-scoring
+    # recording entity even when the search match itself is correct. The
+    # fallback must keep trying lower-scored (still valid) candidates before
+    # giving up.
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    _seed_track(conn, "/x.mp3")  # duration_seconds=258.0
+    conn.close()
+
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/ws/2/recording/":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 2,
+                    "recordings": [
+                        {
+                            "id": "top-no-isrc",
+                            "score": 100,
+                            "title": "Enjoy the Silence",
+                            "length": 258000,
+                            "disambiguation": "",
+                        },
+                        {
+                            "id": "second-has-isrc",
+                            "score": 95,
+                            "title": "Enjoy the Silence",
+                            "length": 258500,
+                            "disambiguation": "single edit",
+                        },
+                    ],
+                },
+            )
+        if request.url.path == "/ws/2/recording/top-no-isrc":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "top-no-isrc",
+                    "title": "Enjoy the Silence",
+                    "length": 258000,
+                    "disambiguation": "",
+                    "isrcs": [],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "second-has-isrc",
+                "title": "Enjoy the Silence",
+                "length": 258500,
+                "disambiguation": "single edit",
+                "isrcs": ["GBAYE9000212"],
+            },
+        )
+
+    with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(handler)):
+        result = runner.invoke(app, ["enrich", "--db", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        "/ws/2/recording/",
+        "/ws/2/recording/top-no-isrc",
+        "/ws/2/recording/second-has-isrc",
+    ]
+    assert "isrc GBAYE9000212" in result.output
+    conn = get_connection(str(db_path))
+    row = conn.execute(
+        "SELECT musicbrainz_isrc, musicbrainz_disambiguation FROM local_tracks"
+    ).fetchone()
+    assert row["musicbrainz_isrc"] == "GBAYE9000212"
+    assert row["musicbrainz_disambiguation"] == "single edit"
+
+
+def test_enrich_stores_top_candidate_disambiguation_when_no_candidate_has_isrc(
+    tmp_path,
+):
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    _seed_track(conn, "/x.mp3")  # duration_seconds=258.0
+    conn.close()
+
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/ws/2/recording/":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 2,
+                    "recordings": [
+                        {
+                            "id": "top-no-isrc",
+                            "score": 100,
+                            "title": "Enjoy the Silence",
+                            "length": 258000,
+                            "disambiguation": "top pick",
+                        },
+                        {
+                            "id": "second-no-isrc",
+                            "score": 95,
+                            "title": "Enjoy the Silence",
+                            "length": 258500,
+                            "disambiguation": "single edit",
+                        },
+                    ],
+                },
+            )
+        recording_id = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200,
+            json={
+                "id": recording_id,
+                "title": "Enjoy the Silence",
+                "length": 258000,
+                "disambiguation": "top pick"
+                if recording_id == "top-no-isrc"
+                else "single edit",
+                "isrcs": [],
+            },
+        )
+
+    with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(handler)):
+        result = runner.invoke(app, ["enrich", "--db", str(db_path)])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        "/ws/2/recording/",
+        "/ws/2/recording/top-no-isrc",
+        "/ws/2/recording/second-no-isrc",
+    ]
+    assert "Enriched 1 track(s), 0 ISRC(s) found" in result.output
+    conn = get_connection(str(db_path))
+    row = conn.execute(
+        "SELECT musicbrainz_isrc, musicbrainz_disambiguation FROM local_tracks"
+    ).fetchone()
+    assert row["musicbrainz_isrc"] is None
+    assert row["musicbrainz_disambiguation"] == "top pick"
+
+
+def test_enrich_dry_run_does_not_write_to_database(tmp_path):
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    _seed_track(conn, "/x.mp3")
+    conn.close()
+
+    def handler(request):
+        if request.url.path == "/ws/2/recording/":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "recordings": [
+                        {
+                            "id": "aaaa1111-0000-0000-0000-000000000000",
+                            "score": 100,
+                            "title": "Enjoy the Silence",
+                            "length": 258000,
+                            "disambiguation": "",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "aaaa1111-0000-0000-0000-000000000000",
+                "title": "Enjoy the Silence",
+                "length": 258000,
+                "disambiguation": "",
+                "isrcs": ["GBAYE9000212"],
+            },
+        )
+
+    with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(handler)):
+        result = runner.invoke(app, ["enrich", "--db", str(db_path), "--dry-run", "5"])
+
+    assert result.exit_code == 0, result.output
+    assert "isrc GBAYE9000212" in result.output
+    assert "[dry-run] Enriched 1 track(s), 1 ISRC(s) found" in result.output
+    conn = get_connection(str(db_path))
+    row = conn.execute(
+        "SELECT musicbrainz_isrc, musicbrainz_checked_fingerprint FROM local_tracks"
+    ).fetchone()
+    assert row["musicbrainz_isrc"] is None
+    assert row["musicbrainz_checked_fingerprint"] is None
+
+
+def test_enrich_dry_run_limits_to_n_tracks(tmp_path):
+    db_path = tmp_path / "catalog.db"
+    conn = get_connection(str(db_path))
+    _seed_track(conn, "/a.mp3", fingerprint="fp-a")
+    _seed_track(conn, "/b.mp3", fingerprint="fp-b")
+    conn.close()
+
+    def handler(request):
+        return httpx.Response(200, json={"count": 0, "recordings": []})
+
+    with patch("offcatalog.cli.MusicBrainzClient", side_effect=_fake_client(handler)):
+        result = runner.invoke(app, ["enrich", "--db", str(db_path), "--dry-run", "1"])
+
+    assert result.exit_code == 0, result.output
+    assert "[dry-run] Enriched 1 track(s), 0 ISRC(s) found" in result.output
+
+
 def test_enrich_isolates_per_track_failure(tmp_path):
     db_path = tmp_path / "catalog.db"
     conn = get_connection(str(db_path))
